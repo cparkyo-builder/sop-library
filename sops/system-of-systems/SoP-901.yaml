@@ -1,0 +1,338 @@
+apiVersion: ems.sop/v1
+kind: StandardOperatingProcedure
+
+metadata:
+  sop_id: "SoP-901"
+  title: "SoP-as-Code Category Framework & Governance Model"
+  version: "0.1.0"
+  status: Draft
+  category: "System-of-Systems"
+  owners: ["Operations Manager", "AI Governance Lead"]
+  tags: ["governance", "policy-framework", "agent-authority", "constraint-hierarchy", "meta-sop"]
+  redundancy_context: "N/A"
+
+scope:
+  sop_scope: Global
+  applies_to: ["Global"]
+  systems: ["All"]
+  sites: []
+  regions: []
+
+references:
+  guardrails: []
+  related: []
+
+intent:
+  objective: "Define the classification system, precedence hierarchy, and governance rules that control how AI agents interact with Standard Operating Procedures across all data center operations"
+  success_criteria:
+    - "All SoPs are classified into one of six categories (A-F)"
+    - "Agent authority is clearly bounded for each category"
+    - "Constraint validation hierarchy prevents safety and reliability violations"
+    - "Human approval requirements are explicit for each category"
+    - "Precedence rules prevent optimization from overriding safety or redundancy"
+
+inputs:
+  required_signals: []
+
+preconditions:
+  - check: "All facility SoPs must be classified using this framework"
+  - check: "Agent systems must implement constraint validation hierarchy"
+  - check: "CMMS integration required for Category F validation"
+
+triggers:
+  - on_event: "SoPCreated"
+  - on_event: "SoPModified"
+  - on_event: "AgentProposal"
+  - on_event: "MaintenanceInitiated"
+
+decision_tree:
+  - when: "sop.category == 'A'"
+    then: ["enforce_category_a_rules"]
+  - when: "sop.category == 'B'"
+    then: ["enforce_category_b_rules"]
+  - when: "sop.category == 'C'"
+    then: ["enforce_category_c_rules"]
+  - when: "sop.category == 'D'"
+    then: ["enforce_category_d_rules"]
+  - when: "sop.category == 'E'"
+    then: ["enforce_category_e_rules"]
+  - when: "sop.category == 'F'"
+    then: ["enforce_category_f_rules"]
+  - when: "agent.proposes_action"
+    then: ["validate_constraint_hierarchy"]
+
+actions:
+  enforce_category_a_rules:
+    steps:
+      - do: "action.block"
+        target: "agent.proposal"
+        params:
+          category: "A"
+          reason: "Category A (Safety & Protection) - Agent authority: READ-ONLY"
+      - do: "log.append"
+        params:
+          message: "Agent attempted to modify Category A SoP - blocked by governance framework"
+          severity: "Critical"
+      - do: "notify.ops"
+        params:
+          message: "Agent attempted unauthorized Category A modification"
+          priority: "immediate"
+
+  enforce_category_b_rules:
+    steps:
+      - do: "action.block"
+        target: "agent.proposal"
+        params:
+          category: "B"
+          reason: "Category B (Reliability & Availability) - Agent authority: READ-ONLY"
+      - do: "log.append"
+        params:
+          message: "Agent attempted to modify Category B SoP - blocked by governance framework"
+          severity: "Critical"
+      - do: "notify.ops"
+        params:
+          message: "Agent attempted unauthorized Category B modification"
+          priority: "immediate"
+
+  enforce_category_c_rules:
+    steps:
+      - do: "command.set"
+        target: "control_system.automated_sequences"
+        params:
+          mode: "autonomous"
+          approval_required: false
+      - do: "action.block"
+        target: "agent.proposal"
+        params:
+          condition: "proposal.is_within_normal_sequence == true"
+          reason: "Category C - Automated sequences execute without agent intervention"
+      - do: "approval.request"
+        target: "agent.proposal"
+        params:
+          condition: "proposal.is_deviation_from_normal == true"
+          required_approvers: ["Operations Supervisor"]
+          timeout: "15m"
+      - do: "log.append"
+        params:
+          message: "Category C deviation proposal requires human approval"
+          severity: "Info"
+
+  enforce_category_d_rules:
+    steps:
+      - do: "workflow.route"
+        target: "validate_constraint_hierarchy"
+        params:
+          proposal_type: "optimization"
+      - do: "approval.request"
+        target: "agent.proposal"
+        params:
+          condition: "validation.passed == true"
+          required_approvers: ["Operations Manager"]
+          timeout: "30m"
+          metadata:
+            forecast_data: true
+            impact_analysis: true
+            cost_benefit: true
+      - do: "action.block"
+        target: "agent.proposal"
+        params:
+          condition: "validation.passed == false"
+          reason: "Optimization violates constraint hierarchy"
+      - do: "log.append"
+        params:
+          message: "Category D optimization proposal logged for approval"
+          severity: "Info"
+
+  enforce_category_e_rules:
+    steps:
+      - do: "workflow.route"
+        target: "validate_constraint_hierarchy"
+        params:
+          proposal_type: "market_grid_interaction"
+      - do: "approval.request"
+        target: "agent.proposal"
+        params:
+          condition: "validation.passed == true"
+          required_approvers: ["Operations Manager", "Energy Manager"]
+          timeout: "15m"
+          metadata:
+            external_signal: true
+            revenue_impact: true
+            contractual_obligations: true
+      - do: "action.block"
+        target: "agent.proposal"
+        params:
+          condition: "validation.passed == false"
+          reason: "Market/grid action violates constraint hierarchy"
+      - do: "notify.ops"
+        params:
+          condition: "validation.passed == false"
+          message: "External signal participation blocked - constraints violated"
+          priority: "high"
+      - do: "log.append"
+        params:
+          message: "Category E market/grid proposal logged for approval"
+          severity: "Info"
+
+  enforce_category_f_rules:
+    steps:
+      - do: "workflow.route"
+        target: "validate_maintenance_preconditions"
+        params:
+          work_order: "cmms.work_order_id"
+      - do: "action.allow"
+        target: "maintenance.proceed"
+        params:
+          condition: "preconditions.all_met == true"
+      - do: "action.block"
+        target: "maintenance.proceed"
+        params:
+          condition: "preconditions.any_failed == true"
+          reason: "Maintenance pre-conditions not met - unsafe to proceed"
+      - do: "notify.ops"
+        params:
+          condition: "preconditions.any_failed == true"
+          message: "Maintenance blocked - pre-condition validation failed"
+          priority: "high"
+          details: "preconditions.failed_checks"
+      - do: "ticket.create_work_order"
+        params:
+          condition: "preconditions.any_failed == true"
+          action: "update_status"
+          status: "On Hold - Equipment Condition"
+      - do: "log.append"
+        params:
+          message: "Category F maintenance validation completed"
+          severity: "Info"
+
+  validate_constraint_hierarchy:
+    steps:
+      - do: "sensor.validate"
+        target: "safety.all_thresholds"
+        params:
+          validation_type: "category_a_constraints"
+      - do: "action.block"
+        params:
+          condition: "safety.violation_detected == true"
+          reason: "Safety constraint violated (Category A)"
+          priority: "immediate"
+      - do: "sensor.validate"
+        target: "reliability.redundancy_status"
+        params:
+          validation_type: "category_b_constraints"
+      - do: "action.block"
+        params:
+          condition: "reliability.redundancy_violated == true"
+          reason: "Redundancy requirement violated (Category B)"
+          priority: "immediate"
+      - do: "sensor.validate"
+        target: "operations.bounds"
+        params:
+          validation_type: "category_c_constraints"
+      - do: "action.block"
+        params:
+          condition: "operations.outside_bounds == true"
+          reason: "Operating outside normal bounds (Category C)"
+          priority: "high"
+      - do: "sensor.validate"
+        target: "maintenance.equipment_status"
+        params:
+          validation_type: "category_f_state"
+      - do: "sensor.validate"
+        target: "maintenance.resiliency_check"
+        params:
+          condition: "maintenance.equipment_offline == true"
+      - do: "action.block"
+        params:
+          condition: "maintenance.resiliency_insufficient == true"
+          reason: "Maintenance state causes redundancy violation"
+          priority: "high"
+      - do: "log.append"
+        params:
+          message: "Constraint hierarchy validation completed"
+          validation_result: "{{validation.status}}"
+          severity: "Info"
+
+  validate_maintenance_preconditions:
+    steps:
+      - do: "sensor.validate"
+        target: "equipment.redundancy_status"
+        params:
+          equipment_id: "{{work_order.equipment_id}}"
+          check: "redundancy_maintained"
+      - do: "sensor.validate"
+        target: "equipment.load_capacity"
+        params:
+          equipment_id: "{{work_order.equipment_id}}"
+          check: "remaining_capacity_above_threshold"
+          threshold: 80
+      - do: "sensor.validate"
+        target: "equipment.alarm_status"
+        params:
+          equipment_scope: "redundant_equipment"
+          check: "no_active_alarms"
+      - do: "sensor.validate"
+        target: "maintenance.conflicts"
+        params:
+          check: "no_conflicting_work_in_progress"
+      - do: "sensor.validate"
+        target: "equipment.operational_mode"
+        params:
+          equipment_id: "{{work_order.equipment_id}}"
+          check: "can_enter_maintenance_mode"
+      - do: "approval.request"
+        params:
+          condition: "all_preconditions_met == true"
+          action: "allow_maintenance_to_proceed"
+      - do: "action.block"
+        params:
+          condition: "any_precondition_failed == true"
+          reason: "{{failed_precondition.description}}"
+      - do: "notify.ops"
+        params:
+          message: "Maintenance pre-condition validation: {{validation.result}}"
+          details: "{{validation.failed_checks}}"
+      - do: "log.append"
+        params:
+          message: "Maintenance pre-condition validation completed"
+          work_order: "{{work_order.id}}"
+          result: "{{validation.status}}"
+
+observability:
+  kpis:
+    - name: "category_a_violations_blocked"
+      expr: "count(agent.proposals where category='A' and status='blocked')"
+    - name: "category_b_violations_blocked"
+      expr: "count(agent.proposals where category='B' and status='blocked')"
+    - name: "category_c_deviations_approved"
+      expr: "count(agent.proposals where category='C' and status='approved')"
+    - name: "category_d_optimizations_approved"
+      expr: "count(agent.proposals where category='D' and status='approved')"
+    - name: "category_e_market_actions_approved"
+      expr: "count(agent.proposals where category='E' and status='approved')"
+    - name: "category_f_maintenance_blocked"
+      expr: "count(maintenance.work_orders where status='blocked' and reason='precondition_failure')"
+    - name: "inadvertent_outages_prevented"
+      expr: "count(maintenance.work_orders where validation='single_point_of_failure_detected')"
+    - name: "constraint_hierarchy_violations"
+      expr: "count(agent.proposals where validation.failed='constraint_hierarchy')"
+    - name: "approval_response_time_avg"
+      expr: "avg(approval.response_time_seconds) by category"
+    - name: "agent_governance_compliance_rate"
+      expr: "(count(agent.proposals where governance='compliant') / count(agent.proposals)) * 100"
+
+audit:
+  approvals:
+    required: true
+    levels:
+      - role: "Operations Supervisor"
+        categories: ["C"]
+      - role: "Operations Manager"
+        categories: ["D"]
+      - role: "Energy Manager"
+        categories: ["E"]
+    audit_trail: true
+  ticketing:
+    require_ticket: true
+    system: "CMMS"
+    categories: ["F"]
