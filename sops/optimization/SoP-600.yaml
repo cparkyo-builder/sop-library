@@ -1,0 +1,314 @@
+apiVersion: ems.sop/v1
+kind: StandardOperatingProcedure
+
+metadata:
+  sop_id: "SoP-600"
+  title: "Central Plant Optimization - Chiller Plant Sequencing & Control"
+  version: "10.0.0"
+  status: Active
+  category: "Optimization"
+  owners: ["Facilities_Manager", "BMS_Operator", "Controls_Engineer"]
+  tags: ["chiller", "optimization", "sequencing", "COP", "waterside_economizer", "cooling_tower", "condenser_water", "efficiency"]
+  redundancy_context: "2N+1"
+
+scope:
+  sop_scope: Site
+  applies_to: ["Site"]
+  systems: ["ChillerPlant", "BMS", "CoolingTower", "CondenserWater", "ChilledWater"]
+  sites: []
+  regions: []
+
+references:
+  guardrails: ["SoP-901"]
+  related: ["SoP-650", "SoP-651", "SoP-700"]
+
+intent:
+  objective: "Optimize central chiller plant operation by selecting the most efficient combination of up to 8 chillers, pumps, cooling towers, and heat exchangers to meet building cooling load while minimizing energy consumption via COP-based sequencing."
+  success_criteria:
+    - "Chillers operate within optimal percent load range (Upper/Lower Optimal Percent Load)"
+    - "Building cooling load met within staging margin tolerance"
+    - "System differential pressure maintained at setpoint ± deadband"
+    - "Condenser water temperature maintained at setpoint"
+    - "Waterside economizer utilized when outdoor conditions permit"
+    - "Chiller runtime and start counts equalized per configuration"
+
+inputs:
+  required_signals:
+    - "bms.chiller.ch01.load_pct"
+    - "bms.chiller.ch01.kw"
+    - "bms.chiller.ch01.tons"
+    - "bms.chiller.ch01.status"
+    - "bms.chiller.ch01.flamps_pct"
+    - "bms.chwp.pchwp01.flow_gpm"
+    - "bms.chwp.pchwp01.speed_pct"
+    - "bms.chwp.dp_sensor.pressure_psid"
+    - "bms.cwp.cwp01.flow_gpm"
+    - "bms.cwp.cwp01.speed_pct"
+    - "bms.tower.ct01.fan_speed_pct"
+    - "bms.tower.ct01.sump_temp_f"
+    - "bms.chw.supply_temp_f"
+    - "bms.chw.return_temp_f"
+    - "bms.cw.supply_temp_f"
+    - "bms.cw.return_temp_f"
+    - "bms.weather.outdoor_air_temp_f"
+    - "bms.weather.wet_bulb_temp_f"
+    - "bms.building.cooling_load_tons"
+    - "bms.economizer.hx01.status"
+
+preconditions:
+  - check: "bms.chiller_plant.mode == 'AUTO'"
+  - check: "bms.chiller_plant.enable == true"
+  - check: "bms.fire.suppression_active == false"
+
+triggers:
+  - on_event: "BuildingLoadChange"
+  - on_event: "ChillerStageRequest"
+  - on_event: "WatersideEconomizerSuitable"
+  - on_schedule: "*/5 * * * *"  # Every 5 minutes for optimization search
+
+decision_tree:
+  - when: "bms.weather.wet_bulb_temp_f < waterside_economizer.enable_setpoint AND waterside_economizer.enabled == true"
+    then: ["evaluate_economizer_mode"]
+  
+  - when: "building_load.percent > chiller_selector.upper_percent_load + chiller_selector.staging_margin"
+    then: ["stage_up_chiller"]
+  
+  - when: "building_load.percent < chiller_selector.lower_percent_load - chiller_selector.staging_margin"
+    then: ["stage_down_chiller"]
+  
+  - when: "chiller_selector.search_timer.expired == true"
+    then: ["search_efficient_combination"]
+  
+  - when: "chw_pump.dp_sensor.value > chw_pump.dp_setpoint + chw_pump.dp_deadband"
+    then: ["modulate_chw_pump_down"]
+  
+  - when: "chw_pump.dp_sensor.value < chw_pump.dp_setpoint - chw_pump.dp_deadband"
+    then: ["modulate_chw_pump_up"]
+  
+  - when: "cw_temp.supply < cw_temp.setpoint - cw_temp.deadband"
+    then: ["reduce_tower_fan_speed"]
+  
+  - when: "cw_temp.supply > cw_temp.setpoint + cw_temp.deadband"
+    then: ["increase_tower_fan_speed"]
+
+actions:
+  evaluate_economizer_mode:
+    steps:
+      - do: "sensor.validate"
+        target: "bms.weather.wet_bulb_temp_f"
+      - do: "command.set"
+        target: "waterside_economizer.suitability_check"
+        params: { enable: true }
+      - do: "wait.until"
+        params: { condition: "waterside_economizer.suitable == true", timeout: "60s" }
+      - do: "event.emit"
+        params: { event: "WatersideEconomizerTransition" }
+      - do: "workflow.route"
+        params: { next_action: "transition_to_economizer" }
+
+  transition_to_economizer:
+    steps:
+      - do: "command.set"
+        target: "chiller.ch*.isolation_valve"
+        params: { position: "CLOSED" }
+      - do: "delay.wait"
+        params: { duration: "30s" }
+      - do: "command.set"
+        target: "chiller.ch*.enable"
+        params: { command: "OFF" }
+      - do: "command.set"
+        target: "economizer.hx*.isolation_valve"
+        params: { position: "OPEN" }
+      - do: "delay.wait"
+        params: { duration: "60s" }
+      - do: "command.set"
+        target: "economizer.hx*.enable"
+        params: { command: "ON" }
+      - do: "setpoint.adjust"
+        target: "bms.cw.temp_setpoint"
+        params: { value: "economizer.cw_temp_setpoint" }
+
+  stage_up_chiller:
+    steps:
+      - do: "approval.request"
+        params: { message: "Stage up chiller - load exceeds upper threshold" }
+      - do: "log.append"
+        params: { severity: "INFO", message: "Initiating chiller stage up sequence" }
+      - do: "command.set"
+        target: "chiller_selector.stage_request"
+        params: { direction: "UP" }
+      - do: "wait.until"
+        params: { condition: "chiller_selector.transition_complete == true", timeout: "300s" }
+      - do: "event.emit"
+        params: { event: "ChillerStageUpComplete" }
+      - do: "workflow.route"
+        params: { next_action: "verify_chiller_staging" }
+
+  stage_down_chiller:
+    steps:
+      - do: "log.append"
+        params: { severity: "INFO", message: "Initiating chiller stage down sequence" }
+      - do: "command.set"
+        target: "chiller_selector.stage_request"
+        params: { direction: "DOWN" }
+      - do: "delay.wait"
+        params: { duration: "chiller_selector.stage_down_delay" }
+      - do: "wait.until"
+        params: { condition: "chiller_selector.transition_complete == true", timeout: "300s" }
+      - do: "event.emit"
+        params: { event: "ChillerStageDownComplete" }
+
+  search_efficient_combination:
+    steps:
+      - do: "log.append"
+        params: { severity: "INFO", message: "Searching for more efficient chiller combination" }
+      - do: "command.set"
+        target: "chiller_selector.efficiency_search"
+        params: { enable: true }
+      - do: "sensor.validate"
+        target: "bms.chiller.ch*.cop"
+      - do: "workflow.route"
+        params: { next_action: "evaluate_cop_optimization" }
+
+  evaluate_cop_optimization:
+    steps:
+      - do: "command.set"
+        target: "chiller_selector.calculate_adjusted_capacity"
+        params: { consider_lift_sensitivity: true }
+      - do: "command.set"
+        target: "chiller_selector.compare_combinations"
+      - do: "wait.until"
+        params: { condition: "chiller_selector.optimal_combination_found == true", timeout: "120s" }
+      - do: "workflow.route"
+        params: { next_action: "transition_to_optimal_combination" }
+
+  transition_to_optimal_combination:
+    steps:
+      - do: "approval.request"
+        params: { message: "Transition to more efficient chiller combination", auto_approve_threshold: "5%" }
+      - do: "command.set"
+        target: "chiller_selector.transition_request"
+        params: { target_combination: "chiller_selector.optimal_combination" }
+      - do: "notify.ops"
+        params: { message: "Chiller plant transitioning to optimized combination" }
+      - do: "wait.until"
+        params: { condition: "chiller_selector.transition_complete == true", timeout: "600s" }
+
+  modulate_chw_pump_down:
+    steps:
+      - do: "command.set"
+        target: "bms.chwp.vfd.speed_cmd"
+        params: { adjust: "-5%", rate_limit: "2%/min" }
+      - do: "delay.wait"
+        params: { duration: "30s" }
+      - do: "sensor.validate"
+        target: "bms.chwp.dp_sensor.pressure_psid"
+
+  modulate_chw_pump_up:
+    steps:
+      - do: "command.set"
+        target: "bms.chwp.vfd.speed_cmd"
+        params: { adjust: "+5%", rate_limit: "2%/min" }
+      - do: "delay.wait"
+        params: { duration: "30s" }
+      - do: "sensor.validate"
+        target: "bms.chwp.dp_sensor.pressure_psid"
+
+  reduce_tower_fan_speed:
+    steps:
+      - do: "command.stage_down"
+        target: "bms.tower.ct*.fan_speed"
+        params: { decrement: "10%", min_speed: "30%" }
+      - do: "delay.wait"
+        params: { duration: "60s" }
+      - do: "sensor.validate"
+        target: "bms.cw.supply_temp_f"
+
+  increase_tower_fan_speed:
+    steps:
+      - do: "command.stage_up"
+        target: "bms.tower.ct*.fan_speed"
+        params: { increment: "10%", max_speed: "100%" }
+      - do: "delay.wait"
+        params: { duration: "60s" }
+      - do: "sensor.validate"
+        target: "bms.cw.supply_temp_f"
+
+  verify_chiller_staging:
+    steps:
+      - do: "sensor.validate"
+        target: "bms.chiller.ch*.status"
+      - do: "sensor.validate"
+        target: "bms.chiller.ch*.load_pct"
+      - do: "workflow.route"
+        params: { next_action: "verify_pump_flow", condition: "all_chillers_stable == true" }
+
+  verify_pump_flow:
+    steps:
+      - do: "sensor.validate"
+        target: "bms.chwp.pchwp*.flow_gpm"
+      - do: "sensor.validate"
+        target: "bms.cwp.cwp*.flow_gpm"
+      - do: "command.set"
+        target: "chiller_selector.flow_verification"
+        params: { min_flow_check: true }
+
+alarm_matrix:
+  - point_name: "bms.chiller.ch01.fault"
+    description: "Chiller fault alarm"
+    severity: Critical
+    auto_action: "stage_down_chiller"
+    escalation: "Facilities_Manager"
+  
+  - point_name: "bms.chwp.dp_sensor.low_pressure"
+    description: "Low chilled water differential pressure"
+    severity: Major
+    auto_action: "modulate_chw_pump_up"
+    escalation: "BMS_Operator"
+  
+  - point_name: "bms.chwp.dp_sensor.high_pressure"
+    description: "High chilled water differential pressure"
+    severity: Major
+    auto_action: "modulate_chw_pump_down"
+    escalation: "BMS_Operator"
+  
+  - point_name: "bms.tower.ct01.low_level"
+    description: "Cooling tower low sump level"
+    severity: Critical
+    auto_action: null
+    escalation: "Facilities_Manager"
+  
+  - point_name: "waterside_economizer.ice_formation_risk"
+    description: "Risk of ice formation in waterside economizer"
+    severity: Major
+    auto_action: "transition_to_chiller_mode"
+    escalation: "BMS_Operator"
+  
+  - point_name: "chiller_selector.no_valid_combination"
+    description: "No valid chiller combination to meet load"
+    severity: Critical
+    auto_action: null
+    escalation: "Facilities_Manager"
+
+observability:
+  kpis:
+    - name: "plant_cop"
+      expr: "sum(bms.chiller.ch*.tons) / sum(bms.chiller.ch*.kw)"
+    
+    - name: "building_load_tons"
+      expr: "bms.building.cooling_load_tons"
+    
+    - name: "plant_efficiency_pct"
+      expr: "(plant_cop / nominal_cop) * 100"
+    
+    - name: "chiller_optimal_load_pct"
+      expr: "count(bms.chiller.ch*.load_pct BETWEEN lower_optimal AND upper_optimal) / count(bms.chiller.ch*.status == ON)"
+    
+    - name: "economizer_hours"
+      expr: "sum(bms.economizer.hx*.status == ON) * sample_interval / 3600"
+
+audit:
+  approvals:
+    required: true
+  ticketing:
+    require_ticket: true
