@@ -1,0 +1,364 @@
+apiVersion: ems.sop/v1
+kind: StandardOperatingProcedure
+
+metadata:
+  sop_id: "SoP-600"
+  title: "Data Center HVAC Cooling System Operation"
+  version: "0.1.0"
+  status: Draft
+  category: "Reliability & Availability"
+  owners: ["Facilities Manager", "HVAC Technician"]
+  tags: ["hvac", "cooling", "crac", "data-center", "hot-aisle", "cold-aisle", "precision-cooling", "temperature-control", "humidity-control"]
+  redundancy_context: "2N+1"
+
+scope:
+  sop_scope: Site
+  applies_to: ["Site"]
+  systems: ["HVAC", "CRAC", "ChillerPlant", "BMS"]
+  sites: []
+  regions: []
+
+references:
+  guardrails: ["SoP-901"]
+  related: ["SoP-602", "SoP-604", "SoP-700"]
+
+intent:
+  objective: "Maintain data center environmental conditions within ASHRAE-recommended temperature (64.4-80.6°F) and dew point (41.9-59°F) ranges through optimal CRAC unit operation, hot-aisle/cold-aisle airflow management, and efficient cooling system control."
+  success_criteria:
+    - "All server inlet temperatures remain within 64.4-80.6°F"
+    - "Dew point maintained between 41.9-59°F"
+    - "Temperature rate of rise does not exceed 0.5°C/min during transitions"
+    - "Underfloor plenum static pressure maintained at minimum 0.05 in-wg"
+    - "HVAC system effectiveness ratio between 0.6-2.5"
+    - "No hot spots detected in cold aisles"
+    - "Cold air/hot air mixing minimized below 10%"
+
+inputs:
+  required_signals:
+    - "hvac.crac_*.supply_air_temp"
+    - "hvac.crac_*.return_air_temp"
+    - "hvac.crac_*.dew_point"
+    - "hvac.crac_*.relative_humidity"
+    - "hvac.crac_*.fan_speed"
+    - "hvac.crac_*.compressor_status"
+    - "hvac.plenum.static_pressure"
+    - "hvac.cold_aisle_*.temp"
+    - "hvac.hot_aisle_*.temp"
+    - "hvac.crac_*.airflow_cfm"
+    - "hvac.outdoor.ambient_temp"
+    - "hvac.outdoor.wet_bulb_temp"
+    - "facility.it_load_kw"
+
+preconditions:
+  - check: "hvac.crac_*.operational_status == 'online'"
+  - check: "hvac.plenum.static_pressure >= 0.05"
+  - check: "hvac.crac_*.refrigerant_level == 'normal'"
+
+triggers:
+  - on_event: "AlarmHotspotDetected"
+  - on_event: "AlarmTemperatureOutOfRange"
+  - on_event: "AlarmHumidityOutOfRange"
+  - on_event: "AlarmCRACFailure"
+  - on_event: "AlarmLowPlenumPressure"
+  - on_schedule: "*/15 * * * *"  # Every 15 minutes monitoring
+
+decision_tree:
+  - when: "hvac.cold_aisle_*.temp > 80.6"
+    then: ["increase_crac_capacity", "verify_perforated_tile_placement", "check_airflow_obstructions"]
+  
+  - when: "hvac.cold_aisle_*.temp < 64.4"
+    then: ["decrease_crac_capacity", "adjust_crac_setpoint"]
+  
+  - when: "hvac.hot_aisle_*.temp < hvac.cold_aisle_*.temp + 15"
+    then: ["investigate_air_mixing", "verify_containment_integrity"]
+  
+  - when: "hvac.plenum.static_pressure < 0.05"
+    then: ["increase_fan_speed", "inspect_plenum_leaks", "verify_tile_perforation"]
+  
+  - when: "hvac.crac_*.dew_point > 59 OR hvac.crac_*.dew_point < 41.9"
+    then: ["adjust_humidity_control", "verify_humidifier_dehumidifier"]
+  
+  - when: "hvac.outdoor.ambient_temp < 55 AND hvac.outdoor.wet_bulb_temp < 45"
+    then: ["enable_free_cooling", "modulate_economizer_dampers"]
+  
+  - when: "hvac.crac_*.status == 'fault'"
+    then: ["activate_redundant_crac", "notify_maintenance", "create_work_order"]
+
+actions:
+  increase_crac_capacity:
+    steps:
+      - do: "command.stage_up"
+        target: "hvac.crac_primary"
+        params:
+          increment: "10%"
+          max_capacity: "100%"
+      - do: "wait.until"
+        params:
+          condition: "hvac.cold_aisle_*.temp <= 75"
+          timeout_min: 10
+      - do: "log.append"
+        params:
+          message: "CRAC capacity increased due to high cold aisle temperature"
+
+  decrease_crac_capacity:
+    steps:
+      - do: "command.stage_down"
+        target: "hvac.crac_primary"
+        params:
+          decrement: "10%"
+          min_capacity: "30%"
+      - do: "wait.until"
+        params:
+          condition: "hvac.cold_aisle_*.temp >= 68"
+          timeout_min: 10
+
+  verify_perforated_tile_placement:
+    steps:
+      - do: "notify.ops"
+        params:
+          severity: "Major"
+          message: "Manual verification required: Check perforated tile placement in cold aisles"
+      - do: "ticket.create_work_order"
+        params:
+          title: "Verify Perforated Tile Configuration"
+          priority: "high"
+          description: "Inspect cold aisle perforated tiles for proper 25-50% perforation and alignment with equipment intakes"
+
+  check_airflow_obstructions:
+    steps:
+      - do: "notify.ops"
+        params:
+          severity: "Major"
+          message: "Potential airflow obstruction detected - inspect cable management and plenum"
+      - do: "ticket.create_work_order"
+        params:
+          title: "Inspect Airflow Obstructions"
+          priority: "high"
+          description: "Check for cable trays, wire-ways, or debris blocking underfloor plenum airflow"
+
+  adjust_crac_setpoint:
+    steps:
+      - do: "setpoint.adjust"
+        target: "hvac.crac_*.supply_air_setpoint"
+        params:
+          new_value: 72
+          units: "degF"
+      - do: "delay.wait"
+        params:
+          duration_min: 15
+      - do: "sensor.validate"
+        params:
+          signal: "hvac.cold_aisle_*.temp"
+          expected_range: [68, 75]
+
+  investigate_air_mixing:
+    steps:
+      - do: "alarm.suppress_transient"
+        params:
+          duration_min: 5
+      - do: "notify.ops"
+        params:
+          severity: "Minor"
+          message: "Hot/cold air mixing detected - verify containment barriers and door seals"
+      - do: "ticket.create_work_order"
+        params:
+          title: "Verify Aisle Containment Integrity"
+          description: "Inspect hot aisle/cold aisle containment curtains, barriers, and end caps for gaps or damage"
+
+  verify_containment_integrity:
+    steps:
+      - do: "notify.ops"
+        params:
+          severity: "Minor"
+          message: "Containment verification required"
+      - do: "log.append"
+        params:
+          message: "Containment integrity check initiated due to insufficient temperature differential"
+
+  increase_fan_speed:
+    steps:
+      - do: "command.modulate"
+        target: "hvac.crac_*.fan_vfd"
+        params:
+          target_speed_pct: "+15"
+          max_speed_pct: 95
+      - do: "wait.until"
+        params:
+          condition: "hvac.plenum.static_pressure >= 0.05"
+          timeout_min: 5
+
+  inspect_plenum_leaks:
+    steps:
+      - do: "ticket.create_work_order"
+        params:
+          title: "Underfloor Plenum Leak Inspection"
+          priority: "high"
+          description: "Inspect plenum for cable penetrations, unsealed gaps, and structural openings. Seal all leaks with fire-rated material."
+
+  verify_tile_perforation:
+    steps:
+      - do: "notify.ops"
+        params:
+          severity: "Major"
+          message: "Verify perforated tile specifications - should be 25-50% open for 500-2000 CFM delivery"
+
+  adjust_humidity_control:
+    steps:
+      - do: "command.set"
+        target: "hvac.crac_*.dehumidifier_enable"
+        params:
+          value: true
+        conditions:
+          - "hvac.crac_*.dew_point > 59"
+      - do: "command.set"
+        target: "hvac.crac_*.humidifier_enable"
+        params:
+          value: true
+        conditions:
+          - "hvac.crac_*.dew_point < 41.9"
+      - do: "delay.wait"
+        params:
+          duration_min: 10
+
+  verify_humidifier_dehumidifier:
+    steps:
+      - do: "sensor.validate"
+        params:
+          signal: "hvac.crac_*.humidifier_status"
+      - do: "sensor.validate"
+        params:
+          signal: "hvac.crac_*.dehumidifier_status"
+
+  enable_free_cooling:
+    steps:
+      - do: "command.enable"
+        target: "hvac.economizer.damper_control"
+        params:
+          mode: "free_cooling"
+      - do: "command.modulate"
+        target: "hvac.economizer.outside_air_damper"
+        params:
+          position_pct: 100
+      - do: "command.stage_down"
+        target: "hvac.crac_*.compressor"
+        params:
+          target_capacity_pct: 0
+      - do: "log.append"
+        params:
+          message: "Free cooling mode enabled - ambient conditions favorable"
+
+  modulate_economizer_dampers:
+    steps:
+      - do: "command.modulate"
+        target: "hvac.economizer.outside_air_damper"
+        params:
+          position_pct: "AUTO"
+          control_mode: "enthalpy"
+
+  activate_redundant_crac:
+    steps:
+      - do: "command.start"
+        target: "hvac.crac_standby"
+      - do: "wait.until"
+        params:
+          condition: "hvac.crac_standby.status == 'running'"
+          timeout_min: 2
+      - do: "notify.ops"
+        params:
+          severity: "Critical"
+          message: "Primary CRAC failed - standby unit activated"
+
+  notify_maintenance:
+    steps:
+      - do: "notify.ops"
+        params:
+          severity: "Critical"
+          message: "CRAC unit failure detected - immediate maintenance required"
+          escalation_path: "facilities_manager -> dcim_manager -> site_director"
+
+  create_work_order:
+    steps:
+      - do: "ticket.create_work_order"
+        params:
+          title: "CRAC Unit Failure - Emergency Repair"
+          priority: "critical"
+          description: "CRAC unit fault detected. Standby unit activated. Immediate diagnosis and repair required."
+          assigned_to: "hvac_maintenance_team"
+
+alarm_matrix:
+  - point_name: "hvac.cold_aisle_*.temp"
+    description: "Cold aisle temperature exceeds ASHRAE recommended maximum"
+    severity: Major
+    auto_action: "increase_crac_capacity"
+    escalation: "facilities_tech -> facilities_manager"
+
+  - point_name: "hvac.hot_aisle_*.temp"
+    description: "Hot aisle temperature differential insufficient - indicates air mixing"
+    severity: Minor
+    auto_action: "investigate_air_mixing"
+    escalation: "facilities_tech"
+
+  - point_name: "hvac.crac_*.supply_air_temp"
+    description: "CRAC supply air temperature out of range"
+    severity: Major
+    auto_action: "adjust_crac_setpoint"
+    escalation: "facilities_tech -> facilities_manager"
+
+  - point_name: "hvac.crac_*.dew_point"
+    description: "Dew point outside ASHRAE range (41.9-59°F)"
+    severity: Major
+    auto_action: "adjust_humidity_control"
+    escalation: "facilities_tech -> facilities_manager"
+
+  - point_name: "hvac.plenum.static_pressure"
+    description: "Underfloor plenum static pressure below 0.05 in-wg"
+    severity: Major
+    auto_action: "increase_fan_speed"
+    escalation: "facilities_tech -> facilities_manager"
+
+  - point_name: "hvac.crac_*.status"
+    description: "CRAC unit fault or offline"
+    severity: Critical
+    auto_action: "activate_redundant_crac"
+    escalation: "facilities_manager -> dcim_manager -> site_director"
+
+  - point_name: "hvac.crac_*.compressor_status"
+    description: "CRAC compressor failure"
+    severity: Critical
+    auto_action: "activate_redundant_crac"
+    escalation: "facilities_manager -> dcim_manager"
+
+  - point_name: "hvac.crac_*.airflow_cfm"
+    description: "CRAC airflow below minimum (500 CFM/ton)"
+    severity: Major
+    auto_action: "check_airflow_obstructions"
+    escalation: "facilities_tech -> facilities_manager"
+
+observability:
+  kpis:
+    - name: "hvac_system_effectiveness"
+      expr: "facility.it_load_kw / sum(hvac.crac_*.power_kw)"
+      
+    - name: "cooling_system_efficiency_kw_per_ton"
+      expr: "sum(hvac.crac_*.power_kw) / (sum(hvac.crac_*.cooling_tons))"
+      
+    - name: "airflow_efficiency_w_per_cfm"
+      expr: "sum(hvac.crac_*.fan_power_kw) * 1000 / sum(hvac.crac_*.airflow_cfm)"
+      
+    - name: "cold_aisle_temp_avg_f"
+      expr: "avg(hvac.cold_aisle_*.temp)"
+      
+    - name: "hot_aisle_temp_avg_f"
+      expr: "avg(hvac.hot_aisle_*.temp)"
+      
+    - name: "temperature_differential_f"
+      expr: "avg(hvac.hot_aisle_*.temp) - avg(hvac.cold_aisle_*.temp)"
+      
+    - name: "plenum_static_pressure_in_wg"
+      expr: "hvac.plenum.static_pressure"
+
+audit:
+  approvals:
+    required: true
+  ticketing:
+    require_ticket: true
