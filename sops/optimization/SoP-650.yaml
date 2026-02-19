@@ -1,0 +1,245 @@
+apiVersion: ems.sop/v1
+kind: StandardOperatingProcedure
+
+metadata:
+  sop_id: "SoP-650"
+  title: "RTU and AHU HVAC Control Sequence"
+  version: "1.2.0"
+  status: Active
+  category: "Optimization"
+  owners: ["HVAC_Operations", "BMS_Operator"]
+  tags: ["RTU", "AHU", "economizer", "DCV", "smart_recovery", "office", "warehouse"]
+  redundancy_context: "N"
+
+scope:
+  sop_scope: Site
+  applies_to: ["Site"]
+  systems: ["RTU", "AHU", "MAU", "ExhaustFan", "CeilingFan", "BMS"]
+  sites: []
+  regions: []
+
+references:
+  guardrails: ["SoP-901"]
+  related: ["SoP-651", "SoP-700"]
+
+intent:
+  objective: "Control RTU and AHU systems to maintain comfort, optimize energy usage through economizer and DCV strategies, and provide safe operation with smart recovery algorithms"
+  success_criteria:
+    - "Zone temperatures maintained within occupied setpoints ±2°F"
+    - "CO2 levels remain below 1000 ppm during occupied periods"
+    - "Economizer operation maximizes free cooling when outdoor conditions permit"
+    - "Smart recovery algorithm achieves target temperature before occupancy"
+
+inputs:
+  required_signals:
+    - "rtu.*.zone_temp"
+    - "rtu.*.zone_co2"
+    - "rtu.*.occupied_cool_sp"
+    - "rtu.*.occupied_heat_sp"
+    - "weather.outside_air_temp"
+    - "weather.outside_air_humidity"
+    - "weather.outside_air_enthalpy"
+    - "rtu.*.discharge_fan_status"
+    - "rtu.*.network_energy_offset"
+    - "scheduler.occupancy_mode"
+
+preconditions:
+  - check: "rtu.discharge_fan_status == proven"
+  - check: "rtu.freeze_stat != tripped"
+
+triggers:
+  - on_schedule: "smart_scheduler A-T"
+  - on_event: "OccupancyModeChange"
+  - on_event: "TemperatureDeviation"
+  - on_event: "CO2Exceeded"
+
+decision_tree:
+  - when: "occupancy_mode == 'Occupied' AND zone_temp > (occupied_cool_sp + network_energy_offset)"
+    then: ["start_cooling_occupied"]
+  - when: "occupancy_mode == 'Occupied' AND zone_temp < (occupied_heat_sp - network_energy_offset)"
+    then: ["start_heating_occupied"]
+  - when: "occupancy_mode == 'Unoccupied' AND zone_temp > unoccupied_cool_sp"
+    then: ["start_cooling_unoccupied"]
+  - when: "occupancy_mode == 'Unoccupied' AND zone_temp < unoccupied_heat_sp"
+    then: ["start_heating_unoccupied"]
+  - when: "zone_co2 > 800 AND zone_co2 <= 1000"
+    then: ["increase_ventilation"]
+  - when: "zone_co2 > 1000"
+    then: ["max_ventilation"]
+  - when: "outside_air_temp < 55 AND outside_enthalpy < 28"
+    then: ["enable_economizer_only"]
+  - when: "outside_air_temp >= 55 AND outside_air_temp < 75 AND econ_enable == true"
+    then: ["enable_combination_mode"]
+  - when: "outside_air_temp >= 75 OR outside_enthalpy >= 28"
+    then: ["enable_mechanical_only"]
+
+actions:
+  start_cooling_occupied:
+    steps:
+      - do: "command.start"
+        target: "rtu.discharge_fan"
+      - do: "wait.until"
+        params: { condition: "rtu.discharge_fan_status == proven", timeout: "3min" }
+      - do: "command.set"
+        target: "rtu.cooling_stages"
+        params: { mode: "staged", demand_source: "zone_temp", setpoint: "zone_cool_sp" }
+      - do: "command.set"
+        target: "rtu.economizer_damper"
+        params: { position: "per_cooling_mode" }
+
+  start_cooling_unoccupied:
+    steps:
+      - do: "command.start"
+        target: "rtu.discharge_fan"
+      - do: "wait.until"
+        params: { condition: "rtu.discharge_fan_status == proven", timeout: "3min" }
+      - do: "command.set"
+        target: "rtu.cooling_stages"
+        params: { mode: "staged", demand_source: "zone_temp", setpoint: "unoccupied_cool_sp" }
+
+  start_heating_occupied:
+    steps:
+      - do: "command.start"
+        target: "rtu.discharge_fan"
+      - do: "wait.until"
+        params: { condition: "rtu.discharge_fan_status == proven", timeout: "3min" }
+      - do: "command.set"
+        target: "rtu.heating_stages"
+        params: { mode: "staged", demand_source: "zone_temp", setpoint: "zone_heat_sp", lockout_temp: "65F" }
+      - do: "command.set"
+        target: "rtu.economizer_damper"
+        params: { position: "min_fresh_air_sp" }
+
+  start_heating_unoccupied:
+    steps:
+      - do: "command.start"
+        target: "rtu.discharge_fan"
+      - do: "wait.until"
+        params: { condition: "rtu.discharge_fan_status == proven", timeout: "3min" }
+      - do: "command.set"
+        target: "rtu.heating_stages"
+        params: { mode: "staged", demand_source: "zone_temp", setpoint: "unoccupied_heat_sp", lockout_temp: "65F" }
+
+  increase_ventilation:
+    steps:
+      - do: "setpoint.adjust"
+        target: "rtu.outside_damper_min_sp"
+        params: { from: "5%", to: "15%", reset_range: "800-1000ppm", signal: "zone_co2" }
+
+  max_ventilation:
+    steps:
+      - do: "command.set"
+        target: "rtu.outside_damper_min_sp"
+        params: { position: "100%" }
+      - do: "notify.ops"
+        params: { severity: "warning", message: "CO2 exceeded 1000 ppm - dampers fully open" }
+
+  enable_economizer_only:
+    steps:
+      - do: "command.set"
+        target: "rtu.cooling_mode"
+        params: { mode: "economizer_only" }
+      - do: "command.modulate"
+        target: "rtu.economizer_damper"
+        params: { control_point: "discharge_temp_sp", setpoint: "55F" }
+      - do: "action.block"
+        target: "rtu.mechanical_cooling"
+
+  enable_combination_mode:
+    steps:
+      - do: "command.set"
+        target: "rtu.cooling_mode"
+        params: { mode: "combination" }
+      - do: "command.set"
+        target: "rtu.economizer_damper"
+        params: { position: "100%", stage: "first" }
+      - do: "command.enable"
+        target: "rtu.mechanical_cooling"
+        params: { stage: "second" }
+
+  enable_mechanical_only:
+    steps:
+      - do: "command.set"
+        target: "rtu.cooling_mode"
+        params: { mode: "mechanical" }
+      - do: "command.set"
+        target: "rtu.economizer_damper"
+        params: { position: "outside_damper_min_sp" }
+      - do: "command.enable"
+        target: "rtu.mechanical_cooling"
+
+alarm_matrix:
+  - point_name: "rtu.discharge_fan_status"
+    description: "Discharge fan commanded on but status shows off"
+    severity: Critical
+    auto_action: null
+    escalation: "After 15 min delay, create incident ticket"
+
+  - point_name: "rtu.zone_temp"
+    description: "Zone temperature outside comfort range (Office: 73-79°F, Warehouse: 75-81°F)"
+    severity: Major
+    auto_action: null
+    escalation: "After 1.5 min delay, alert operations"
+
+  - point_name: "rtu.zone_co2"
+    description: "CO2 level exceeds 2000 ppm"
+    severity: Critical
+    auto_action: "max_ventilation"
+    escalation: "Immediate notification if 50% or more sensors exceed threshold"
+
+  - point_name: "rtu.freeze_stat_trip"
+    description: "Freeze protection stat tripped"
+    severity: Critical
+    auto_action: null
+    escalation: "Immediate shutdown and alarm after 5 sec delay"
+
+  - point_name: "rtu.low_limit_alarm"
+    description: "Low limit temperature alarm"
+    severity: Critical
+    auto_action: null
+    escalation: "Immediate notification after 5 sec delay"
+
+  - point_name: "rtu.discharge_smoke"
+    description: "Duct smoke detector activated"
+    severity: Critical
+    auto_action: null
+    escalation: "Immediate alarm after 5 sec delay"
+
+  - point_name: "ahu.filter_alarm"
+    description: "Dirty filter condition detected"
+    severity: Minor
+    auto_action: null
+    escalation: "Create maintenance work order after 5 sec delay"
+
+  - point_name: "hydrogen.level_high_alarm"
+    description: "High level hydrogen alarm (50% LEL)"
+    severity: Critical
+    auto_action: null
+    escalation: "Immediate notification, enable exhaust fan and siren/strobe"
+
+  - point_name: "hydrogen.level_low_alarm"
+    description: "Low level hydrogen alarm (25% LEL)"
+    severity: Critical
+    auto_action: null
+    escalation: "Immediate notification, enable exhaust fan"
+
+  - point_name: "fire_panel.fire_alarm"
+    description: "Fire panel alarm activated"
+    severity: Critical
+    auto_action: null
+    escalation: "Immediate notification, 0 sec delay"
+
+observability:
+  kpis:
+    - name: "economizer_hours"
+      expr: "sum(rtu.cooling_mode == 'economizer_only') * sample_interval"
+    - name: "avg_zone_temp_deviation"
+      expr: "avg(abs(rtu.zone_temp - rtu.zone_cool_sp))"
+    - name: "avg_co2_level"
+      expr: "avg(rtu.zone_co2)"
+    - name: "network_energy_offset_applied"
+      expr: "avg(rtu.network_energy_offset)"
+
+audit:
+  approvals: { required: true }
+  ticketing: { require_ticket: true }
