@@ -1,0 +1,402 @@
+# =============================================================================
+# Standard Operating Procedure (SOP) — as code
+# Transfer UPS from Maintenance Bypass Mode to Normal (Online) Mode
+# -----------------------------------------------------------------------------
+# This YAML is a structured, machine-readable representation of the source SOP.
+# It is designed to drive a digital checklist / runbook executor:
+#   - `metadata`     : document control fields
+#   - `equipment`    : assets in scope (fill `asset_id` / `location` per site)
+#   - `precautions`  : risk notes the operator must read before starting
+#   - `prerequisites`: safety + readiness gates that must pass before step 1
+#   - `phases`       : ordered groups of steps; each step has actions/verifies/records
+#   - `backout`      : abort path if the critical load is threatened
+#   - `signoff`      : event-completion record
+#
+# Field conventions:
+#   action  : an imperative operation the technician performs
+#   verify  : a condition that must be TRUE to proceed (pass/fail gate)
+#   record  : a measured value the operator writes down (data capture)
+#   warning : a hazard callout that must be acknowledged
+#   na_if   : condition under which the step may be marked Not Applicable
+# =============================================================================
+
+sop:
+  schema_version: "1.0"
+
+  metadata:
+    title: "Transfer UPS from Maintenance Bypass Mode to Normal (Online) Mode"
+    type: "SOP"
+    version: "2.1"
+    document_state: "Approved"
+    file_name: "NA_US_XXXX_OPS_SOP_XX_XXXX_XX_Transfer_UPS_Maintenance_Bypass_to_Normal_Online_Mode"
+    procedure_number: "NA_US_Transfer_UPS_from_Maintenance_Bypass_Mode_to_Normal_Online_Mode"
+    author: "Bill McNutt"
+    responsible_owner: "Site Manager"
+    approved_by_cab: "Senior Person Approval"
+    cab_ticket_number: null            # fill at execution time
+    language: "English"
+    security_classification: "For Internal Use Only"
+    next_review_due: null              # fill: YYYY-MM-DD
+    modified: null                     # fill: YYYY-MM-DD
+    domain: "Data Center Operations"
+    sites_designation: null            # fill per site
+    estimated_time_hours: 1.0          # add in 0.5 hr increments
+
+  scope: >
+    This SOP transfers a single UPS system to Normal (Online) Mode following
+    activities such as maintenance, repairs, upgrades, and testing. It is a
+    common operating procedure that may be referenced whenever needed.
+
+  systems_in_scope:
+    - id: UPS
+      name: "Uninterruptible Power Supply (UPS) System"
+      operated: true
+    - id: MBS
+      name: "Maintenance Bypass Switchboard (MBS)"
+      operated: true
+    - id: AASB
+      name: "Advanced Automatic Switchboard (AASB)"
+      operated: false
+      note: "Not operated during this procedure (monitored only)."
+    - id: BC
+      name: "Battery Cabinet (BC)"
+      operated: true
+    - id: PDU
+      name: "Power Distribution Unit (PDU)"
+      operated: true
+
+  equipment:
+    # Fill the blanks with the specific details for the UPS system being restored.
+    - type: "UPS"
+      asset_id_pattern: "1-UPS-________"
+      location: "Electrical Room ________"
+    - type: "Switchgear"
+      asset_id_pattern: "1-MBS-________"
+      location: "Electrical Room ________"
+    - type: "PDU"
+      asset_id_pattern: "1-PDU-________"
+      location: "Electrical Room ________"
+
+  precautions:
+    - context: "While the UPS is in Maintenance Bypass Mode"
+      notes:
+        - >
+          The critical load is supported entirely by utility (standard) or
+          generator power; battery backup is unavailable. Any interruption in
+          utility power results in loss of one PDU power source to the critical load.
+        - >
+          Avoid transferring from utility to generator power (or vice versa) if
+          possible — this causes a brief loss of one source of power to the critical load.
+
+  safety_requirements:
+    - "Perform a Job Hazard Analysis (JHA) and attach the document to the Work Order."
+
+  reference_values:
+    ups_control_panel_level2_password: "0101"
+
+  # ===========================================================================
+  # PRE-EVOLUTION GATES (steps 1–8) — readiness, safety, and turnover
+  # ===========================================================================
+  prerequisites:
+    - id: 1
+      type: action
+      instruction: >
+        INFORM the following personnel that the UPS will be placed into Normal
+        (Online) Mode and that the alarms "UPS on Bypass" and "MBS on Bypass"
+        are expected on BMS during the procedure.
+      expected_alarms: ["UPS on Bypass", "MBS on Bypass"]
+      notify:
+        - "Energy"
+        - "Facilities Management"
+        - "OCC"
+
+    - id: 2
+      type: action
+      instruction: >
+        CONDUCT a pre-evolution brief with, at minimum, the operators performing
+        the procedure, the OCC operator, and all vendors involved. ENSURE the
+        brief reviews the procedure, each person's roles and responsibilities,
+        and the associated JHA.
+
+    - id: 3
+      type: verify
+      instruction: "VERIFY there are no abnormal alarms on the following control panels."
+      checks:
+        - "UPS Control Panel HMI (Logs tabs)"
+        - "PDU HMI"
+        - "AASB HMI #1 and #2"
+
+    - id: 4
+      type: verify
+      instruction: >
+        VERIFY there are no abnormal alarms on the generators for the lineup
+        associated with the UPS being placed into Normal (Online) Mode.
+
+    - id: 5
+      type: action
+      instruction: >
+        ATTACH a magnetic red LED light to the MBS, UPS, and Battery Cabinet
+        being operated and ENERGIZE the lights.
+
+    - id: 6
+      type: action
+      instruction: "ESTABLISH or VERIFY the electrical safety work boundaries."
+
+    - id: 7
+      type: action
+      instruction: "Perform a closeout inspection prior to transferring the UPS to Normal (Online) Mode."
+      checks:
+        - "VERIFY all tools and debris are removed from inside and around the UPS."
+        - "VERIFY UPS covers and hardware are properly installed."
+
+    - id: 8
+      type: action
+      instruction: >
+        TURNOVER the UPS system from the technician to Operations. The vendor or
+        technician signature indicates all repair/maintenance work is complete and
+        the UPS is ready for restoration to online service.
+      signoff_fields:
+        - field: "technician_name"
+          value: null
+        - field: "technician_company"
+          value: null
+        - field: "technician_signature"
+          value: null
+
+  # ===========================================================================
+  # EXECUTION PHASES
+  # ===========================================================================
+  phases:
+
+    - name: "Prepare the UPS for Power Restoration"
+      steps:
+        - id: 9
+          type: action
+          instruction: "REMOVE LO/TO from the following affected units."
+          substeps:
+            - "PDU Sub feed 17"
+            - "Battery cabinet strings 1–6 (unlock and open cabinets)"
+
+        - id: 10
+          type: action
+          instruction: "REMOVE the LOTO from the Battery String circuit breakers."
+          substeps:
+            - action: "CLOSE circuit breaker Sub feed 17 (Battery String Control Power)."
+            - action: "CLOSE each of the Battery String circuit breakers."
+              items:
+                - "Battery String Circuit Breaker 1"
+                - "Battery String Circuit Breaker 2"
+                - "Battery String Circuit Breaker 3"
+                - "Battery String Circuit Breaker 4"
+                - "Battery String Circuit Breaker 5"
+                - "Battery String Circuit Breaker 6"
+                - "Battery String Circuit Breaker 7 (if present)"
+            - action: "CLOSE and LOCK the battery string cover panels."
+
+        - id: 11
+          type: action
+          instruction: "REMOVE the LOTO from the MIS and MIB circuit breakers."
+          substeps:
+            - "MIS circuit breaker."
+            - action: "MIB circuit breaker."
+              na_if: "MIB circuit breaker LOTO was already removed — mark N/A."
+
+    - name: "Place the UPS in Static Bypass (if not already done)"
+      steps:
+        - id: 12
+          type: action
+          instruction: "On the MBS, CLOSE the MIB circuit breaker."
+          na_if: "MIB circuit breaker was already closed for UPS testing — mark N/A."
+          note: >
+            Allow time for the UPS to start up and monitor the unit for
+            abnormalities as it comes online. The UPS will automatically start up
+            into Static Bypass mode.
+
+        - id: 13
+          type: record
+          instruction: "On the UPS Control Panel, RECORD the following."
+          fields:
+            - name: "ups_mode"
+              prompt: "UPS Mode"
+              options: ["Static Bypass", "Startup Mode"]
+              value: null
+            - name: "ups_on_inverters"
+              prompt: "UPS on Inverter(s)"
+              options: ["Yes", "No"]
+              value: null
+            - name: "ups_load_kva"
+              prompt: "UPS Load"
+              unit: "kVA"
+              value: null
+          verify: "No unexpected Active Events on the Event tab."
+
+        - id: 14
+          type: branch
+          instruction: "If the UPS is already in Static Bypass mode, then go to Step 17.e."
+          condition: "ups_mode == 'Static Bypass'"
+          goto: "17.e"
+
+        - id: 15
+          type: action
+          instruction: "On the UPS Control Panel, place the UPS in Static Bypass."
+          substeps:
+            - "PRESS the padlock graphic (upper right) and ENTER level-2 password 0101 to unlock the screen."
+            - "PRESS the \"Controls\" button to access the System Controls screen."
+            - "On the System Controls screen, SELECT \"Go To Bypass\"."
+            - "When the Bypass Control Command screen pops up, PRESS \"Yes\" to confirm."
+            - verify: "VERIFY on the UPS Control Panel HMI:"
+              checks:
+                - "The \"Bypass\" status indicator is illuminated (amber)."
+                - "The \"Bypass\" status indicates On."
+            - record: "Confirm the previously recorded UPS Output kVA now appears on the Bypass Meters."
+              navigation:
+                - "PRESS the \"Meters\" button."
+                - "PRESS the \"Bypass Meters\" button."
+                - "PRESS the \"Show Details\" button."
+              fields:
+                - name: "ups_bypass_phase_a_kva"
+                  prompt: "UPS Bypass – Phase A"
+                  unit: "kVA"
+                  value: null
+                - name: "ups_bypass_phase_b_kva"
+                  prompt: "UPS Bypass – Phase B"
+                  unit: "kVA"
+                  value: null
+                - name: "ups_bypass_phase_c_kva"
+                  prompt: "UPS Bypass – Phase C"
+                  unit: "kVA"
+                  value: null
+                - name: "ups_bypass_total_kva"
+                  prompt: "UPS Bypass – Total"
+                  unit: "kVA"
+                  value: null
+            - "PRESS the \"Home\" button."
+            - verify: "VERIFY on the UPS lineup graphic:"
+              checks:
+                - "Rectifiers are deenergized (no green box)."
+                - "Batteries are not charging (no green down arrow)."
+                - "Inverter output contactors are open."
+            - "PRESS the \"Meters\" button."
+
+    - name: "Transfer the UPS to Normal (Online) Mode"
+      steps:
+        - id: 16
+          type: action
+          instruction: "At the MBS, place the UPS in Normal (Online) Mode."
+          substeps:
+            - "VERIFY the SKRU Lamp is illuminated (white), indicating the UPS is in Static Bypass."
+            - "On the SKRU, PRESS and HOLD the white pushbutton. TURN and REMOVE Key A, then RELEASE the pushbutton."
+            - "INSERT Key A into the MBP circuit breaker Kirk Key Interlock and TURN clockwise to retract the bolt, unlocking the MIS circuit breaker."
+            - "CLOSE the MIS circuit breaker."
+            - verify: "At the UPS Control Panel, VERIFY minimal load has transferred to the MIS circuit breaker:"
+              checks:
+                - "Load on the Bypass Meters is 0 kVA."
+                - "Home screen graphic indicates Maintenance Bypass and Static Bypass lines are paralleled (both green)."
+            - "REMOVE Key B from the MIS Kirk Key Interlock."
+            - "INSERT and TURN Key B into the MBP circuit breaker Kirk Key Interlock."
+            - warning: >
+                Failure to close the MIS breaker prior to opening the MBP breaker
+                will result in a loss of one source of power to the critical load.
+              before_step: "OPEN the MBP circuit breaker"
+            - "OPEN the MBP circuit breaker."
+            - "TURN and REMOVE Key A to lock the MBP circuit breaker in the Off position."
+            - "On the SKRU, INSERT and TURN Key A to lock the MBS into Normal mode."
+
+        - id: 17
+          type: action
+          instruction: "On the UPS Control Panel, complete the transition to Normal (Online) Mode."
+          substeps:
+            - ref: "17.a"
+              text: "PRESS the padlock graphic (upper right) and ENTER level-2 password 0101 to unlock the screen."
+            - ref: "17.b"
+              text: "PRESS the \"Controls\" button to access the System Status screen and SELECT \"Go To Online\"."
+            - ref: "17.c"
+              text: "When the Confirmation screen pops up, PRESS \"Yes\" to confirm."
+            - ref: "17.d"
+              verify: "VERIFY on the UPS Control Panel:"
+              checks:
+                - "The \"Normal\" status indicator is illuminated (green)."
+                - "The UPS status indicates Online."
+                - "The four (4) UPM statuses each indicate Online."
+            - ref: "17.e"
+              note: "Branch target from Step 14."
+
+        - id: 18
+          type: record
+          instruction: "On the UPS Control Panel, RECORD the following."
+          fields:
+            - name: "ups_on_inverter"
+              prompt: "UPS on Inverter"
+              options: ["Yes", "No"]
+              value: null
+            - name: "ups_output_kva"
+              prompt: "UPS Output"
+              unit: "kVA"
+              value: null
+            - name: "ups_output_kw"
+              prompt: "UPS Output"
+              unit: "kW"
+              value: null
+          verify:
+            - "No Active Events on the Events tab."
+            - "All abnormal alarms are cleared."
+
+        - id: 19
+          type: verify
+          instruction: "VERIFY there are no abnormal alarms on the following control panels."
+          checks:
+            - "UPS Control Panel"
+            - "PDU HMI"
+            - "AASB HMI #1 and #2"
+            - "On the MBS, the Bypass status indicator is unlit (not glowing white)."
+
+        - id: 20
+          type: action
+          instruction: "DOFF arc flash PPE."
+
+        - id: 21
+          type: action
+          instruction: >
+            DEENERGIZE and REMOVE the magnetic red LED lights from the MBS, UPS,
+            and Battery Cabinet and RETURN them to their normally stowed location.
+
+        - id: 22
+          type: action
+          instruction: "TAKE DOWN the electrical safety work boundaries."
+
+    - name: "Communicate Status Change of UPS"
+      steps:
+        - id: 23
+          type: action
+          instruction: "INFORM the following personnel that the UPS has been placed into Normal (Online) Mode."
+          notify:
+            - "Client"
+            - "Facilities Management"
+            - "OCC"
+
+  # ===========================================================================
+  # BACKOUT / ABORT PATH
+  # ===========================================================================
+  backout:
+    trigger: "Any problem occurs that affects the critical load."
+    procedures:
+      - id: 1
+        instruction: "Backout procedures will commence immediately if any problem occurs that affects the critical load."
+      - id: 2
+        instruction: "In the event of equipment failure or critical power outage:"
+        substeps:
+          - "Stop all work."
+          - "Safely clear all tools and personnel from the work area."
+      - id: 3
+        instruction: "INITIATE the Escalation Procedure, as appropriate."
+
+  # ===========================================================================
+  # EVENT COMPLETION / SIGN-OFF
+  # ===========================================================================
+  signoff:
+    sop_supervisor:
+      name: null
+      title: null
+      signature: null
+      date: null
+    comments_lessons_learned: null
