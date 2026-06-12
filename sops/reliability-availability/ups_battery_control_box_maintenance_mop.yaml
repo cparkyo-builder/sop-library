@@ -1,0 +1,530 @@
+# =============================================================================
+# Method of Procedure (MOP) — as code
+# UPS Battery Control Box Maintenance
+# -----------------------------------------------------------------------------
+# Structured, machine-readable representation of the source MOP. Designed to
+# drive a digital runbook / checklist executor.
+#
+#   metadata        : document control fields
+#   work_description: overview, system status, load impact
+#   indicators      : legend mapping the source icon set to step attributes
+#   roles           : vendor + employee/participant roster (fill at execution)
+#   expected_alarms : alarms anticipated during the work (do not treat as faults)
+#   affected_equipment : assets worked on / locked out
+#   required_ppe_tools : PPE, tools, materials gate
+#   sections        : ordered, numbered work blocks (pre-work, procedure,
+#                     validation, rollback) mirroring the MOP's Section 1–4
+#
+# Step attribute conventions:
+#   type    : action | verify | record | branch | decision
+#   cst     : true  -> "CST REQUIRED" critical switching step (two-operator rule)
+#   icons   : source indicator tags preserved for traceability, e.g.
+#             [stop_validate_go, important_note, change_of_state, rollback_point]
+#   na_if   : condition under which the step may be marked Not Applicable
+# =============================================================================
+
+mop:
+  schema_version: "1.0"
+
+  metadata:
+    title: "UPS Battery Control Box Maintenance"
+    type: "MOP"                         # Method of Procedure
+    target_system: "UPS M2A-1 Battery System"
+    document_state: null                # fill at execution
+    version: null
+    date: null
+    authors: null
+    approved_by: null
+    revision_history: null
+    two_operator_rule: >
+      A team of two authorized operators must be formed when conducting
+      high-risk (critical switching) operations to ensure stability and accuracy.
+
+  work_description:
+    overview:
+      target_systems: "UPS M2A-1 Battery System"
+      background: >
+        Intermittent communication issues have been identified on Battery M2A-1,
+        but they have not affected system operation at this time.
+      expected_effect: "Enhancing battery management by stabilizing EMS monitoring."
+
+    ups_status:
+      ups_name: "UPS - M2A - 1"
+      capacity: "500kW * 3 (1500kW)"
+      battery_rack: "1 module (3.2V 16-cell 20Ah * 4) * 11 modules * 7 racks"
+      module_detail: >
+        Each UPS battery module = 16 cells of 3.2V 20Ah in 4 parallel strings.
+        One rack = 11 modules; one system = 7 racks.
+
+    load_by_type:
+      - ups_name: "UPS - M2A - 1"
+        capacity: "500kW * 3 (1500kW)"
+        ups_load_kw: 322
+        total_load_kw: 639
+        load_during_event: "X"          # this unit is the one under maintenance
+        power_supply_load: "Coil Wall, Pump"
+      - ups_name: "UPS - M2A - 2"
+        capacity: "500kW * 3 (1500kW)"
+        ups_load_kw: 317
+        total_load_kw: 639
+        load_during_event_kw: 639        # picks up full load if an event occurs
+        power_supply_load: "Coil Wall, Pump"
+
+    work_impact: >
+      After opening the battery Main BCB during mechanical work, there is no issue
+      with power supply from the UPS. In a power outage, load distribution shifts
+      (per the load_by_type table) but power is still supplied by the UPS, so the
+      coil wall and pump continue to operate without problem.
+
+  safety_requirements:
+    preface: >
+      Before working, check for risks; if present, refer to the documents below
+      to mitigate them.
+    reference_documents:
+      - title: "Electrical safety"
+        description: "Use when performing electrical cutoff work (Standard-XXX)"
+      - title: "Safe work practices"
+        description: "General work (Standard-XXX)"
+      - title: "Management of EHS incident"
+        description: "Response procedures in case of an accident (Standard-XXX)"
+      - title: "Change Management Framework"
+        description: "Routine maintenance work (Standard-XXX)"
+
+  # ---------------------------------------------------------------------------
+  # Legend: source icon set -> attributes used on steps below
+  # ---------------------------------------------------------------------------
+  indicators:
+    cst_required:     "Critical switching step (CST REQUIRED)"
+    change_of_state:  "Change of state"
+    open_position:    "Open position"
+    closed_position:  "Closed position"
+    safety_alert:     "Safety alert"
+    important_note:   "Important note"
+    stop_validate_go: "Stop, validate/verify, go/no-go"
+    rollback_point:   "Rollback here, if necessary"
+
+  expected_alarms:
+    equipment: "All UPS"
+    note: "These alarms are expected during the procedure and are not abnormal."
+    alarms:
+      - "Battery System Alarm"
+      - "Inverter Fault"
+      - "UPS Output on Maintenance Bypass"
+      - "UPS Output on Bypass"
+      - "Bypass Input Frequency Fault"
+      - "Bypass AC Input and Inverter out of Synchronization"
+      - "Bypass Input Voltage Fault"
+      - "System Input Voltage Fault"
+      - "System in Alarm"
+      - "Breaker State (On/Off, Closed/Open)"
+      - "Breaker Status (Tripped/Normal)"
+      - "Output not in sync with bypass"
+      - "Low Battery Warning"
+
+  roles:
+    vendor:
+      company_name: "Vendor A"
+      service_contact_24x7: "Operation Center Phone No."
+      note: >
+        Ensure vendors are briefed on the work. Vendors must review Safety,
+        Security, and other DC rules.
+    participants:
+      # Fill name/title, alias/contact, and initials per execution.
+      internal_customer: []
+      external_colo_and_vendor:
+        - role: "Controller — leads switching activity, available on site."
+          count: 3
+        - role: "Inspector — monitors work for safety and quality, on site."
+          count: 2
+        - role: "Operator — in charge of Rollback steps in emergency, on site."
+          count: 2
+        - role: "BMS operator — monitors BMS/EPMS from the LOC."
+          count: 2
+        - role: "Work Vendor"
+          count: 2
+
+  affected_equipment:
+    - name: "M2A UPS 1-1"
+      location: "MECH ELEC RM-1"
+      manufacturer: "Eaton"
+      model: "PR93"
+      serial: "4S515WJJ04"
+      rating: "400V/500kVA"
+    - name: "M2A UPS 1-2"
+      location: "MECH ELEC RM-1"
+      manufacturer: "Eaton"
+      model: "PR93"
+      serial: "4S493WJJ05"
+      rating: "400V/500kVA"
+    - name: "M2A UPS 1-3"
+      location: "MECH ELEC RM-1"
+      manufacturer: "Eaton"
+      model: "PR93"
+      serial: "4S494WJJ03"
+      rating: "400V/500kVA"
+    - name: "M2A UPS 2-1"
+      location: "MECH ELEC RM-1"
+      manufacturer: "Eaton"
+      model: "PR93"
+      serial: "4S516WJJ03"
+      rating: "400V/500kVA"
+    - name: "M2A UPS 2-2"
+      location: "MECH ELEC RM-1"
+      manufacturer: "Eaton"
+      model: "PR93"
+      serial: "4S494WJJ05"
+      rating: "400V/500kVA"
+    - name: "M2A UPS 2-3"
+      location: "MECH ELEC RM-1"
+      manufacturer: "Eaton"
+      model: "PR93"
+      serial: "4S493WJJ07"
+      rating: "400V/500kVA"
+
+  required_ppe_tools:
+    - item: "Work glove"
+      reason: "Standard PPE around critical infrastructure."
+    - item: "Safety boots & protection helmet"
+      reason: "Standard PPE around critical infrastructure."
+    - item: "Beacons/strobes"
+      reason: "Equipment identification."
+    - item: "Radio"
+      reason: "For effective communication."
+    - item: "Barriers"
+      reason: "To restrict access."
+    - item: "Safety headset"
+      reason: "Protection against noise."
+    - item: "Safety ladder"
+      reason: "To check the upper part of the generator."
+    - item: "Megger"
+      reason: "Equipment power/resistance measurement."
+    - item: "Hook meter"
+      reason: "To check amperes and voltage."
+    - item: "Screwdriver"
+      reason: "To check screws."
+    - item: "Torque wrench"
+      reason: "To check torque values."
+    - item: "Vibration meter"
+      reason: "To measure vibration levels."
+    - item: "Noise meter"
+      reason: "To measure noise levels."
+    - item: "IR thermometer"
+      reason: "To measure temperature."
+
+  reference_values:
+    parallel_backup_capacity_kva: 3000   # 1500kVA * 2 in parallel
+    charging_current_initial_a: 1.0      # single rack connected
+    charging_current_nominal_a: 6.2      # original setting value
+    rack_voltage_diff_max_v: 3.0         # before connecting racks for charging
+    battery_voltage_min_v: 563.2
+    battery_voltage_validation_range_v: [563.2, 580.8]
+    rack_count: 7
+
+  # ===========================================================================
+  # SECTIONS — mirror the MOP's numbered work blocks
+  # ===========================================================================
+  sections:
+
+    # ----- Section 1 -------------------------------------------------------
+    - number: 1
+      name: "Perform Pre-Work and Mitigation Steps"
+      completed_by: "DE"
+      steps:
+        - id: "1.1"
+          type: action
+          icons: [important_note]
+          location: "LOC"
+          equipment: "N/A"
+          instruction: >
+            Weather check to verify no inclement weather is ongoing or expected
+            near the data center for the duration of the CM.
+        - id: "1.2"
+          type: action
+          icons: [important_note]
+          location: "LOC"
+          equipment: "N/A"
+          instruction: >
+            Meet with all onsite employees, vendors, and support personnel; review
+            the work to be completed and conduct a safety briefing per minimum
+            requirements.
+        - id: "1.3"
+          type: action
+          location: "MECH ELEC RM 1"
+          equipment: "N/A"
+          instruction: "Mobilize materials required for implementation of the CM."
+        - id: "1.4"
+          type: action
+          location: "MECH ELEC RM 1"
+          equipment: "N/A"
+          instruction: >
+            Prepare the work area. If a controlled work area is required, ensure
+            all proper measures are implemented and prepared for the CM.
+        - id: "1.5"
+          type: action
+          location: "MECH ELEC RM 1"
+          equipment: "N/A"
+          instruction: "Implement the mitigation plan as appropriate for this CM."
+        - id: "1.6"
+          type: verify
+          icons: [important_note]
+          location: "MECH ELEC RM 1"
+          equipment: "N/A"
+          instruction: "Check that the approval for this change has been completed."
+        - id: "1.7"
+          type: verify
+          location: "LOC"
+          equipment: "EMS"
+          instruction: >
+            Confirm units being serviced are stable with no active alarms, and
+            that area temperatures are stable.
+      summary: "Pre-work and mitigation steps are now complete."
+
+    # ----- Section 2 -------------------------------------------------------
+    - number: 2
+      name: "UPS Battery Power Supply Replacement Work (M1A, M2A, M2R)"
+      completed_by: null
+      steps:
+        - id: "2.1"
+          type: record
+          location: "MECH ELEC RM 1"
+          equipment: "UPS System"
+          instruction: "Record the current UPS load."
+          fields:
+            - name: "ups_load_kw"
+              prompt: "Current UPS load"
+              unit: "kW"
+              value: null
+        - id: "2.2"
+          type: verify
+          location: "MECH ELEC RM 1"
+          equipment: "UPS System"
+          instruction: >
+            Verify the current load can be backed up by the UPS system
+            (parallel configuration: 1500kVA * 2 = 3000kVA).
+        - id: "2.3"
+          type: decision
+          icons: [stop_validate_go]
+          location: "Battery Rm-1"
+          equipment: "UPS System"
+          instruction: "If the UPS system can support the load, proceed with opening the BCB."
+          gate: "ups_can_support_load == true"
+        - id: "2.4"
+          type: verify
+          icons: [important_note]
+          location: "MECH ELEC RM 1,2,4"
+          equipment: "UPS System"
+          instruction: >
+            Check the UPS output status to ensure it is supplying power without
+            issues (check output voltage and current).
+        - id: "2.5"
+          type: action
+          icons: [stop_validate_go, change_of_state]
+          cst: true
+          location: "Battery Rm-1"
+          equipment: "UPS System"
+          instruction: "Open the MCCB for M2A-1 Battery Rack No. 1."
+        - id: "2.6"
+          type: action
+          icons: [stop_validate_go, change_of_state]
+          cst: true
+          location: "Battery Rm-1"
+          equipment: "UPS System"
+          instruction: >
+            Disconnect one of the BUS connections between the UPS battery modules
+            to cut off voltage. Only one BUS in the series connection is removed.
+        - id: "2.7"
+          type: action
+          icons: [stop_validate_go, change_of_state]
+          cst: true
+          location: "Battery Rm-1"
+          equipment: "UPS System"
+          instruction: "Disconnect the following cables from the UPS battery rack."
+          items:
+            - "BCB input power cable"
+            - "Communication cable"
+            - "Battery parallel connection cable"
+            - "Internal battery power cable within the rack"
+        - id: "2.8"
+          type: action
+          icons: [stop_validate_go]
+          location: "Battery Rm-1"
+          equipment: "UPS System"
+          instruction: "Grasp the handle and remove the control box, as shown in the diagram."
+        - id: "2.9"
+          type: action
+          icons: [stop_validate_go]
+          location: "Battery Rm-1"
+          equipment: "UPS System"
+          instruction: >
+            Remove the control boxes of Racks No. 2 through No. 7 following the
+            same procedure as above.
+          repeat_for: ["Rack 2", "Rack 3", "Rack 4", "Rack 5", "Rack 6", "Rack 7"]
+        - id: "2.10"
+          type: action
+          icons: [important_note]
+          location: "Battery Rm-1"
+          equipment: "UPS System"
+          instruction: >
+            Once all control boxes are removed, inspect the communication module
+            per the procedure below.
+        - id: "2.11"
+          type: action
+          icons: [important_note]
+          location: "Battery Rm-1"
+          equipment: "UPS System"
+          instruction: "Inside the control box, disconnect the communication cable from the area indicated (red box)."
+        - id: "2.12"
+          type: verify
+          icons: [stop_validate_go]
+          location: "Battery Rm-1"
+          equipment: "UPS System"
+          instruction: >
+            Connect the communication module to a PC and verify normal operation
+            by checking communication status and analyzing data for abnormalities.
+        - id: "2.13"
+          type: decision
+          icons: [important_note]
+          location: "Battery Rm-1"
+          equipment: "UPS System"
+          instruction: "If no issues are identified, proceed with reassembly per the procedure below."
+          gate: "no_issues_identified == true"
+        - id: "2.14"
+          type: action
+          icons: [stop_validate_go]
+          location: "Battery Rm-1"
+          equipment: "UPS System"
+          instruction: "After replacement, reassemble in reverse order."
+          items:
+            - "Reattach the control box"
+            - "Reconnect the BCB input power cable"
+            - "Reconnect the communication cable"
+            - "Reconnect the battery parallel cable"
+            - "Reconnect the internal battery power cable"
+        - id: "2.15"
+          type: verify
+          icons: [important_note]
+          location: "Battery Rm-1"
+          equipment: "UPS System"
+          instruction: >
+            After completing all connections, connect the monitoring PC and verify
+            internal communication for all racks is operating normally.
+        - id: "2.16"
+          type: action
+          icons: [stop_validate_go, important_note]
+          location: "Battery Rm-1"
+          equipment: "UPS System"
+          instruction: >
+            Set the UPS charging current to 1 A. Before charging, verify the
+            voltage difference between racks is within 3 V, then connect the racks
+            to the UPS and proceed with charging. (Lower current because only a
+            single rack is connected.)
+          parameters:
+            charging_current_a: 1.0
+            rack_voltage_diff_max_v: 3.0
+        - id: "2.17"
+          type: action
+          icons: [stop_validate_go]
+          location: "Battery Rm-1"
+          equipment: "UPS System"
+          instruction: "After step 2.16, if no issues are observed, change the UPS charging current to 6.2 A (original setting)."
+          parameters:
+            charging_current_a: 6.2
+        - id: "2.18"
+          type: verify
+          icons: [stop_validate_go]
+          location: "Battery Rm-1"
+          equipment: "UPS System"
+          instruction: "Confirm the UPS battery voltage is above 563.2 V."
+          criteria: "battery_voltage_v > 563.2"
+        - id: "2.19"
+          type: action
+          icons: [stop_validate_go, change_of_state]
+          cst: true
+          location: "Battery Rm-1"
+          equipment: "UPS System"
+          instruction: "If the MCCB of the UPS battery rack is ON, close the UPS BCBs sequentially."
+        - id: "2.20"
+          type: verify
+          icons: [important_note]
+          location: "MECH ELEC RM 1"
+          equipment: "UPS System"
+          instruction: >
+            Check the UPS output status and confirm batteries are charging properly
+            (check output voltage/current and battery charging voltage/current).
+        - id: "2.21"
+          type: verify
+          icons: [important_note]
+          location: "LOC"
+          equipment: "EPMS"
+          instruction: "Verify the EPMS communication link status indicates normal operation."
+      summary: "Inspection conducted according to DE inspection standards."
+
+    # ----- Section 3 -------------------------------------------------------
+    - number: 3
+      name: "Validation — confirm all facilities restored to normal position and operation"
+      completed_by: null
+      steps:
+        - id: "3.1"
+          type: verify
+          icons: [important_note]
+          location: "MECH ELEC RM 1"
+          equipment: "UPS System"
+          instruction: >
+            Once UPS battery work is complete, verify the system is stable with no
+            active alarms or abnormalities.
+        - id: "3.2"
+          type: verify
+          icons: [important_note]
+          location: "MECH ELEC RM 1"
+          equipment: "UPS System"
+          instruction: "If any breaker positions were changed for the work, double-check them after completion."
+        - id: "3.3"
+          type: verify
+          icons: [important_note]
+          location: "MECH ELEC RM 1"
+          equipment: "UPS System"
+          instruction: "Check the battery voltage and confirm it remains within 563.2 V to 580.8 V."
+          criteria: "563.2 <= battery_voltage_v <= 580.8"
+        - id: "3.4"
+          type: verify
+          icons: [important_note]
+          location: "LOC"
+          equipment: "BMS System"
+          instruction: "Verify system status is normal via the EMS."
+      summary: "Validation for the facilities is completed."
+
+    # ----- Section 4 -------------------------------------------------------
+    - number: 4
+      name: "Rollback — Fail to check each Pump status"
+      completed_by: null
+      trigger: "An unexpected accident occurs during work."
+      steps:
+        - id: "4.1"
+          type: action
+          icons: [stop_validate_go, rollback_point]
+          location: "MECH ELEC RM 1"
+          equipment: "UPS System"
+          instruction: "In case of an unexpected accident during work, immediately stop all tasks."
+        - id: "4.2"
+          type: action
+          icons: [stop_validate_go, rollback_point]
+          location: "MECH ELEC RM 1"
+          equipment: "UPS System"
+          instruction: "Suspend UPS battery work, proceed with restoration, and recover the UPS to Online Mode."
+        - id: "4.3"
+          type: action
+          icons: [important_note]
+          location: "MECH ELEC RM 1"
+          equipment: "UPS System"
+          instruction: "After thoroughly checking equipment status, report the situation to A100."
+        - id: "4.4"
+          type: action
+          icons: [important_note]
+          location: "MECH ELEC RM 1"
+          equipment: "UPS System"
+          instruction: >
+            Investigate the impact on the equipment and, based on the results,
+            provide a detailed equipment-status report to the customer.
+      summary: "Roll back to beginning status."
+
+  comments: null   # Issues or additional information for future use.
