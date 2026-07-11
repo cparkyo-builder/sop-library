@@ -1,0 +1,394 @@
+apiVersion: ems.sop/v1
+kind: StandardOperatingProcedure
+
+metadata:
+  sop_id: "SoP-701"
+  title: "BMS Alarm Management and Response Procedure"
+  version: "0.1.0"
+  status: Active
+  category: "Operational Control"
+  owners: ["Site Operations Manager", "Operations Team", "OCC"]
+  tags: ["bms", "alarm-management", "incident-response", "atl01-2", "cooling", "escalation", "customer-communication"]
+  redundancy_context: "2N+1"
+
+scope:
+  sop_scope: Site
+  applies_to: ["Site"]
+  systems: ["BMS", "EPMS", "PMS", "Chiller", "CCU", "CRAH", "PowerBlock", "Fireworks"]
+  sites: ["ATL01-2"]
+  regions: []
+
+references:
+  guardrails: ["SoP-901"]
+  related: ["SoP-600", "SoP-650", "SoP-300", "SoP-200"]
+
+intent:
+  objective: "Provide a site-specific, repeatable process for managing BMS alarms to protect uptime, maintain customer trust, and ensure disciplined operations during normal and incident conditions"
+  success_criteria:
+    - "P1 alarms acknowledged and responded to within 5 minutes"
+    - "P2 alarms responded to within 15 minutes"
+    - "Field verification dispatched for all SEV1/SEV2 alarms immediately"
+    - "Customer notified proactively for all SEV1-3 events with potential impact"
+    - "All incidents documented with root cause and corrective actions"
+
+inputs:
+  required_signals:
+    - "bms.datahall.*.temperature"
+    - "bms.crah.*.status"
+    - "bms.chw.supply_temp"
+    - "bms.chw.return_temp"
+    - "bms.chw.differential_pressure"
+    - "bms.ccu.*.status"
+    - "bms.ccu.*.airflow"
+    - "bms.hac.differential_pressure"
+    - "pms.electrical.load"
+    - "powercontrol.generator.*.def_level"
+    - "powercontrol.generator.*.fuel_level"
+    - "powercontrol.generator.*.temperature"
+    - "bms.datahall.*.trend_15min"
+    - "bms.datahall.*.trend_30min"
+
+preconditions:
+  - check: "bms.status == 'operational'"
+  - check: "occ.monitoring == 'active'"
+  - check: "site.facility_type == 'live_production'"
+
+triggers:
+  - on_event: "BMS.AlarmGenerated"
+  - on_event: "Temperature.OutOfRange"
+  - on_event: "Cooling.RedundancyLoss"
+  - on_event: "ChilledWater.PressureLow"
+  - on_event: "CRAH.Failure"
+  - on_event: "UPS.OnBattery"
+
+decision_tree:
+  - when: "alarm.severity == 'P1'"
+    then: ["acknowledge_p1_alarm", "rapid_triage_critical", "immediate_dispatch", "escalate_p1", "execute_eop_if_triggered"]
+  - when: "alarm.severity == 'P2'"
+    then: ["acknowledge_p2_alarm", "rapid_triage_high", "immediate_dispatch", "escalate_p2", "execute_eop_if_triggered"]
+  - when: "alarm.severity == 'P3'"
+    then: ["acknowledge_p3_alarm", "controlled_triage", "controlled_escalation", "monitor_trends"]
+  - when: "alarm.severity == 'P4'"
+    then: ["acknowledge_p4_alarm", "log_informational", "monitor_only"]
+  - when: "bms.datahall.temperature > 85"
+    then: ["execute_eop_temperature_critical", "escalate_p1", "notify_customer"]
+  - when: "bms.chw.differential_pressure < 15"
+    then: ["investigate_chw_system", "execute_eop_cooling_loss", "escalate_p2"]
+  - when: "alarm.repeat_count > 3 AND alarm.severity == 'P3'"
+    then: ["trigger_post_incident_review", "tune_alarm_threshold"]
+
+actions:
+  acknowledge_p1_alarm:
+    steps:
+      - do: "command.set"
+        target: "bms.alarm.acknowledged"
+        params: { value: true, operator_id: "$operator", timestamp: "$now" }
+      - do: "log.append"
+        params: 
+          system: "alarm_acknowledged"
+          severity: "P1"
+          time_to_ack: "$elapsed_seconds"
+          system_impacted: "$alarm.system"
+          initial_reading: "$alarm.value"
+      - do: "notify.ops"
+        params: { channel: "occ", message: "P1 alarm acknowledged - immediate response initiated" }
+
+  acknowledge_p2_alarm:
+    steps:
+      - do: "command.set"
+        target: "bms.alarm.acknowledged"
+        params: { value: true, operator_id: "$operator", timestamp: "$now" }
+      - do: "log.append"
+        params: 
+          system: "alarm_acknowledged"
+          severity: "P2"
+          time_to_ack: "$elapsed_seconds"
+          system_impacted: "$alarm.system"
+          initial_reading: "$alarm.value"
+
+  acknowledge_p3_alarm:
+    steps:
+      - do: "command.set"
+        target: "bms.alarm.acknowledged"
+        params: { value: true, operator_id: "$operator", timestamp: "$now" }
+      - do: "log.append"
+        params: 
+          system: "alarm_acknowledged"
+          severity: "P3"
+          system_impacted: "$alarm.system"
+
+  acknowledge_p4_alarm:
+    steps:
+      - do: "command.set"
+        target: "bms.alarm.acknowledged"
+        params: { value: true, operator_id: "$operator" }
+      - do: "log.append"
+        params: { system: "alarm_acknowledged", severity: "P4", type: "informational" }
+
+  rapid_triage_critical:
+    steps:
+      - do: "sensor.validate"
+        params: { timeframe: "15-30min", signals: ["temperature", "airflow", "chw_dp", "electrical_load"] }
+      - do: "trend.log"
+        target: "bms.datahall.*.temperature"
+        params: { period: "last_30min" }
+      - do: "sensor.validate"
+        target: "bms.ccu.*.status"
+        params: { check: "running", airflow: "nominal" }
+      - do: "sensor.validate"
+        target: "bms.chw.differential_pressure"
+        params: { min: 15, max: 20, unit: "PSI" }
+      - do: "sensor.validate"
+        target: "bms.chw.supply_temp"
+      - do: "sensor.validate"
+        target: "bms.chw.return_temp"
+
+  rapid_triage_high:
+    steps:
+      - do: "sensor.validate"
+        params: { timeframe: "15-30min", signals: ["temperature", "airflow", "chw_dp"] }
+      - do: "trend.log"
+        target: "bms.datahall.*.temperature"
+        params: { period: "last_30min" }
+      - do: "sensor.validate"
+        target: "bms.chw.differential_pressure"
+        params: { min: 15, max: 20, unit: "PSI" }
+
+  controlled_triage:
+    steps:
+      - do: "sensor.validate"
+        params: { signals: ["temperature", "chw_dp", "crah_status"] }
+      - do: "trend.log"
+        target: "bms.datahall.*.temperature"
+        params: { period: "last_60min" }
+
+  immediate_dispatch:
+    steps:
+      - do: "notify.ops"
+        params: { role: "field_technician", priority: "immediate", message: "Field verification required for $alarm.system" }
+      - do: "ticket.create_work_order"
+        params:
+          priority: "$alarm.severity"
+          description: "Field verification: $alarm.description"
+          checks: ["verify_actual_temp_vs_bms", "confirm_ccu_operation", "inspect_leaks", "inspect_noise_vibration", "validate_airflow", "check_construction_interference"]
+      - do: "log.append"
+        params: { event: "technician_dispatched", timestamp: "$now" }
+
+  execute_eop_temperature_critical:
+    steps:
+      - do: "sensor.validate"
+        target: "bms.datahall.temperature"
+        params: { threshold: 78, trend: "upward" }
+      - do: "sensor.validate"
+        target: "bms.ccu.*.status"
+        params: { check: "running" }
+      - do: "sensor.validate"
+        target: "bms.chw.flow"
+        params: { check: "present" }
+      - do: "sensor.validate"
+        target: "bms.chw.differential_pressure"
+        params: { min: 15, max: 20, unit: "PSI" }
+      - do: "command.set"
+        target: "bms.cooling.capacity"
+        params: { action: "increase_if_available" }
+      - do: "approval.request"
+        params: { action: "load_shift", approver: "site_operations_manager" }
+
+  execute_eop_cooling_loss:
+    steps:
+      - do: "sensor.validate"
+        target: "bms.chw.differential_pressure"
+        params: { check: "below_15_psi" }
+      - do: "ticket.create_incident"
+        params: { description: "Low CHW differential pressure - investigate pump/chiller performance" }
+      - do: "notify.ops"
+        params: { role: "mechanical_vendor", message: "Investigate pump/chiller performance - low DP detected" }
+      - do: "command.set"
+        target: "bms.cooling.capacity"
+        params: { action: "increase_if_available" }
+
+  execute_eop_if_triggered:
+    steps:
+      - do: "workflow.route"
+        params: { condition: "$alarm.type", routes: { "temperature": "execute_eop_temperature_critical", "cooling_loss": "execute_eop_cooling_loss" } }
+
+  escalate_p1:
+    steps:
+      - do: "notify.ops"
+        params: 
+          recipients: ["site_operations_manager", "site_operations_team", "occ", "chief_engineer", "incident_manager", "director", "vp", "vendor"]
+          priority: "immediate"
+          message: "P1 Critical Alarm: $alarm.description at $alarm.location"
+      - do: "event.emit"
+        params: { event: "incident_bridge_required", severity: "P1" }
+
+  escalate_p2:
+    steps:
+      - do: "notify.ops"
+        params: 
+          recipients: ["site_operations_manager", "site_operations_team", "occ", "chief_engineer", "incident_manager", "regional_director", "vendor"]
+          priority: "immediate"
+          message: "P2 High Alarm: $alarm.description at $alarm.location"
+      - do: "workflow.route"
+        params: { condition: "incident_bridge_required", action: "initiate_incident_bridge" }
+
+  controlled_escalation:
+    steps:
+      - do: "notify.ops"
+        params: 
+          recipients: ["site_leadership", "vendor", "customer_site_leadership", "customer_foc"]
+          message: "P3 Medium Alarm: $alarm.description - monitoring and addressing"
+
+  notify_customer:
+    steps:
+      - do: "notify.ops"
+        params:
+          recipient: "javelin_customer"
+          tone: "calm_confident_factual"
+          message: "We have identified a temperature deviation in $location. Operations and Mechanical Vendor are actively engaged onsite. Systems remain stable, and we will provide updates every $update_interval minutes."
+          trigger: "sev1_sev2_sev3_or_potential_customer_impact"
+
+  investigate_chw_system:
+    steps:
+      - do: "sensor.validate"
+        target: "bms.chw.differential_pressure"
+        params: { target_min: 15, target_max: 20, unit: "PSI" }
+      - do: "sensor.validate"
+        target: "bms.chw.delta_t"
+      - do: "ticket.create_incident"
+        params: { description: "CHW system instability - DP outside target range or low delta-T" }
+      - do: "notify.ops"
+        params: { role: "mechanical_vendor", message: "Investigate CHW pump/chiller performance and efficiency" }
+
+  monitor_trends:
+    steps:
+      - do: "trend.log"
+        params: { signals: ["temperature", "hac_dp", "crah_status"], period: "continuous" }
+      - do: "alarm.suppress_transient"
+        params: { condition: "known_hac_panel_incomplete", duration: "until_corrected" }
+
+  monitor_only:
+    steps:
+      - do: "log.append"
+        params: { event: "informational_alarm", action: "monitor" }
+
+  log_informational:
+    steps:
+      - do: "log.append"
+        params: { event: "p4_alarm", type: "status_or_maintenance_reminder" }
+
+  trigger_post_incident_review:
+    steps:
+      - do: "ticket.create_work_order"
+        params:
+          type: "post_incident_review"
+          required_for: ["all_p1_p2_p3_events", "repeat_p3_alarms", "customer_visible_issues"]
+          include: ["root_cause", "contributing_factors", "corrective_actions", "preventive_measures"]
+
+  tune_alarm_threshold:
+    steps:
+      - do: "approval.request"
+        params: { action: "alarm_threshold_adjustment", approver: "site_operations_manager" }
+      - do: "command.set"
+        target: "bms.alarm.threshold"
+        params: { system: "$alarm.system", new_value: "$calculated_threshold" }
+      - do: "log.append"
+        params: { event: "alarm_tuned", reason: "eliminate_nuisance_alarms" }
+
+alarm_matrix:
+  - point_name: "bms.datahall.temperature"
+    description: "Data Hall temperature exceeds 85°F - immediate risk to uptime"
+    severity: Critical
+    auto_action: "execute_eop_temperature_critical"
+    escalation: "P1 - Site Operations Manager, OCC, Incident Manager, Director, VP, Vendor"
+  
+  - point_name: "bms.chiller.offline"
+    description: "Chiller offline with reduced capacity - redundancy degraded"
+    severity: Major
+    auto_action: "escalate_p2"
+    escalation: "P2 - Site Operations Manager, OCC, Regional Director, Vendor"
+  
+  - point_name: "bms.chw.differential_pressure"
+    description: "CHW differential pressure below 15 PSI - reduced cooling efficiency"
+    severity: Major
+    auto_action: "investigate_chw_system"
+    escalation: "P2 - Site Operations Manager, Mechanical Vendor"
+  
+  - point_name: "bms.crah.failure"
+    description: "CRAH failure in loaded hall - redundancy degraded"
+    severity: Major
+    auto_action: "immediate_dispatch"
+    escalation: "P2 - Site Operations Manager, OCC, Vendor"
+  
+  - point_name: "ups.on_battery"
+    description: "UPS on battery - immediate risk to uptime"
+    severity: Critical
+    auto_action: "escalate_p1"
+    escalation: "P1 - Site Operations Manager, OCC, Incident Manager, Director, VP"
+  
+  - point_name: "bms.datahall.temperature.drift"
+    description: "Temperature drift detected - non-critical deviation"
+    severity: Minor
+    auto_action: "monitor_trends"
+    escalation: "P3 - Site Leadership, Vendor"
+  
+  - point_name: "bms.chw.differential_pressure.trending_low"
+    description: "CHW DP trending low - early warning of cooling efficiency degradation"
+    severity: Minor
+    auto_action: "investigate_chw_system"
+    escalation: "P3 - Mechanical Vendor"
+  
+  - point_name: "bms.sensor.mismatch"
+    description: "Sensor reading mismatch - verification required"
+    severity: Minor
+    auto_action: "controlled_triage"
+    escalation: "P3 - Operations Team"
+  
+  - point_name: "bms.hac.differential_pressure"
+    description: "Hot Aisle Containment DP alarm - known issue with incomplete HAC panels"
+    severity: Info
+    auto_action: null
+    escalation: "P4 - Monitor (alarm flooding mitigation active)"
+  
+  - point_name: "bms.hac.high_temp"
+    description: "Consistent high temp alarms due to incomplete HAC panels"
+    severity: Info
+    auto_action: null
+    escalation: "P4 - Monitor (alarm flooding mitigation active)"
+  
+  - point_name: "bms.maintenance.reminder"
+    description: "Scheduled maintenance reminder"
+    severity: Info
+    auto_action: "log_informational"
+    escalation: "P4 - None"
+
+observability:
+  kpis:
+    - name: "p1_response_time"
+      expr: "time_to_acknowledge + time_to_field_verification <= 300 seconds"
+    - name: "p2_response_time"
+      expr: "time_to_acknowledge + time_to_field_verification <= 900 seconds"
+    - name: "p3_response_time"
+      expr: "time_to_acknowledge <= 3600 seconds"
+    - name: "mtta"
+      expr: "mean(time_to_acknowledge) by severity"
+    - name: "mttr"
+      expr: "mean(time_to_resolution) by severity"
+    - name: "mttn"
+      expr: "mean(time_to_customer_notification) for sev1_sev2_sev3"
+    - name: "repeat_alarm_rate"
+      expr: "count(alarm.repeat_count > 3) by system"
+    - name: "vendor_response_time"
+      expr: "mean(vendor.time_to_arrival) by vendor"
+    - name: "alarm_flood_prevention"
+      expr: "count(grouped_related_alarms) / count(total_alarms)"
+    - name: "chw_dp_stability"
+      expr: "percent_time(bms.chw.differential_pressure in_range(15, 20))"
+
+audit:
+  approvals: 
+    required: true
+    scope: ["load_shift", "alarm_threshold_adjustment"]
+  ticketing: 
+    require_ticket: true
+    types: ["incident", "work_order", "post_incident_review"]
