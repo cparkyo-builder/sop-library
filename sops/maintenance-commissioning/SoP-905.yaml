@@ -1,0 +1,676 @@
+apiVersion: ems.sop/v1
+kind: StandardOperatingProcedure
+
+metadata:
+  sop_id: "SoP-905"
+  title: "Data Center Firmware Validation and Response Procedure"
+  version: "1.0.0"
+  status: Active
+  category: "Maintenance & Commissioning"
+  owners: ["Data Center Director", "Operations Lead", "Field Technician"]
+  tags: ["firmware", "validation", "change-management", "rollback", "CAB", "security", "redundancy", "field-procedure"]
+  redundancy_context: "N+1"
+
+scope:
+  sop_scope: Global
+  applies_to: ["Global"]
+  systems: 
+    - "UPS"
+    - "PDU"
+    - "Generator"
+    - "Chiller"
+    - "CRAH"
+    - "CRAC"
+    - "BMS"
+    - "BAS"
+    - "PLC"
+    - "Switchgear"
+    - "Server"
+    - "Hypervisor"
+    - "Storage"
+    - "Network"
+    - "Firewall"
+    - "LoadBalancer"
+    - "AccessControl"
+    - "DCIM"
+    - "EPMS"
+  sites: []
+  regions: []
+
+references:
+  guardrails: ["SoP-901"]
+  related: ["SoP-000", "SoP-001"]
+
+intent:
+  objective: "Validate firmware changes on data center infrastructure to verify successful installation, maintain operational availability, protect redundancy and resiliency, ensure monitoring visibility, verify cybersecurity controls, support CAB requirements, ensure audit readiness, and standardize technician response actions."
+  success_criteria:
+    - "Firmware version matches approved version and activates successfully"
+    - "Device health shows no new faults, warnings, or degraded states"
+    - "Monitoring systems display current and accurate operational status"
+    - "No unexplained alarms exist and alarm functionality is verified"
+    - "Equipment functions normally with no service impact"
+    - "No loss of resiliency or redundancy exists"
+    - "Security controls (authentication, MFA, RBAC, logging) function normally"
+    - "Required evidence is captured and attached to change record"
+    - "Appropriate soak period is completed before change closure"
+
+inputs:
+  required_signals:
+    - "device.firmware.version"
+    - "device.firmware.activation_status"
+    - "device.health.status"
+    - "device.health.faults"
+    - "device.health.warnings"
+    - "device.hardware.health"
+    - "device.controller.health"
+    - "device.fan.status"
+    - "device.power.status"
+    - "device.temperature.status"
+    - "monitoring.dcim.visibility"
+    - "monitoring.epms.visibility"
+    - "monitoring.bms.visibility"
+    - "monitoring.telemetry.status"
+    - "monitoring.logging.status"
+    - "alarm.critical.count"
+    - "alarm.warning.count"
+    - "alarm.notification.status"
+    - "system.operational_status"
+    - "system.customer_services.status"
+    - "system.configuration.status"
+    - "system.communications.status"
+    - "redundancy.capacity.status"
+    - "redundancy.cluster.health"
+    - "redundancy.ha.status"
+    - "redundancy.failover.status"
+    - "security.authentication.status"
+    - "security.mfa.status"
+    - "security.rbac.status"
+    - "security.logging.status"
+
+preconditions:
+  - check: "change_record.approval_status == 'approved'"
+  - check: "maintenance_window.active == true"
+  - check: "rollback_plan.available == true"
+  - check: "oem_support.contact_info.verified == true"
+  - check: "operations_center.communication_path.confirmed == true"
+  - check: "redundant_systems.available == true"
+
+triggers:
+  - on_event: "FirmwareUpdateCompleted"
+  - on_event: "ValidationRequired"
+
+decision_tree:
+  - when: "firmware.installation.completed == true"
+    then: ["validate_firmware_installation"]
+  
+  - when: "firmware_validation.status == 'pass'"
+    then: ["validate_device_health"]
+  
+  - when: "device_health_validation.status == 'pass'"
+    then: ["validate_monitoring"]
+  
+  - when: "monitoring_validation.status == 'pass'"
+    then: ["validate_alarms"]
+  
+  - when: "alarm_validation.status == 'pass'"
+    then: ["validate_functionality"]
+  
+  - when: "functional_validation.status == 'pass'"
+    then: ["validate_redundancy"]
+  
+  - when: "redundancy_validation.status == 'pass'"
+    then: ["validate_security"]
+  
+  - when: "security_validation.status == 'pass'"
+    then: ["capture_evidence", "assign_soak_period", "complete_validation"]
+  
+  - when: "any_validation.status == 'fail' && service_impact == true"
+    then: ["escalate_immediately"]
+  
+  - when: "any_validation.status == 'fail' && service_impact == false && correctable == true"
+    then: ["apply_corrective_action", "revalidate"]
+  
+  - when: "any_validation.status == 'fail' && service_impact == false && correctable == false"
+    then: ["escalate_to_operations_lead", "evaluate_rollback"]
+  
+  - when: "rollback_trigger.detected == true"
+    then: ["initiate_rollback_review"]
+  
+  - when: "validation.status == 'complete' && soak_period.complete == true && evidence.attached == true"
+    then: ["approve_change_closure"]
+
+actions:
+  validate_firmware_installation:
+    steps:
+      - do: "sensor.validate"
+        target: "device.firmware.version"
+        params:
+          check: "installed_version == approved_version"
+          severity: "critical"
+      - do: "sensor.validate"
+        target: "device.firmware.activation_status"
+        params:
+          check: "activation_status == 'successful'"
+          severity: "critical"
+      - do: "sensor.validate"
+        target: "device.firmware.installation_errors"
+        params:
+          check: "installation_errors == 0"
+          severity: "critical"
+      - do: "log.append"
+        params:
+          message: "Firmware installation validation complete"
+          validation_step: "step_1"
+          result: "${validation_result}"
+
+  validate_device_health:
+    steps:
+      - do: "sensor.validate"
+        target: "device.hardware.health"
+        params:
+          check: "hardware_health == 'healthy'"
+          severity: "major"
+      - do: "sensor.validate"
+        target: "device.controller.health"
+        params:
+          check: "controller_health == 'healthy'"
+          severity: "major"
+      - do: "sensor.validate"
+        target: "device.fan.status"
+        params:
+          check: "fan_status == 'normal'"
+          severity: "major"
+      - do: "sensor.validate"
+        target: "device.power.status"
+        params:
+          check: "power_status == 'normal'"
+          severity: "major"
+      - do: "sensor.validate"
+        target: "device.temperature.status"
+        params:
+          check: "temperature_status == 'normal'"
+          severity: "major"
+      - do: "sensor.validate"
+        target: "device.health.faults"
+        params:
+          check: "new_faults == 0"
+          severity: "critical"
+      - do: "sensor.validate"
+        target: "device.health.warnings"
+        params:
+          check: "new_warnings == 0"
+          severity: "major"
+      - do: "log.append"
+        params:
+          message: "Device health validation complete"
+          validation_step: "step_2"
+          result: "${validation_result}"
+
+  validate_monitoring:
+    steps:
+      - do: "sensor.validate"
+        target: "monitoring.dcim.visibility"
+        params:
+          check: "dcim_visibility == true"
+          severity: "critical"
+      - do: "sensor.validate"
+        target: "monitoring.epms.visibility"
+        params:
+          check: "epms_visibility == true"
+          severity: "critical"
+      - do: "sensor.validate"
+        target: "monitoring.bms.visibility"
+        params:
+          check: "bms_visibility == true"
+          severity: "critical"
+      - do: "sensor.validate"
+        target: "monitoring.telemetry.status"
+        params:
+          check: "telemetry_operational == true"
+          severity: "critical"
+      - do: "sensor.validate"
+        target: "monitoring.logging.status"
+        params:
+          check: "logging_operational == true"
+          severity: "critical"
+      - do: "log.append"
+        params:
+          message: "Monitoring validation complete"
+          validation_step: "step_3"
+          result: "${validation_result}"
+
+  validate_alarms:
+    steps:
+      - do: "sensor.validate"
+        target: "alarm.critical.count"
+        params:
+          check: "unexpected_critical_alarms == 0"
+          severity: "critical"
+      - do: "sensor.validate"
+        target: "alarm.warning.count"
+        params:
+          check: "unexpected_warnings == 0"
+          severity: "major"
+      - do: "sensor.validate"
+        target: "alarm.notification.status"
+        params:
+          check: "alarm_notifications_functioning == true"
+          severity: "major"
+      - do: "log.append"
+        params:
+          message: "Alarm validation complete"
+          validation_step: "step_4"
+          result: "${validation_result}"
+
+  validate_functionality:
+    steps:
+      - do: "sensor.validate"
+        target: "system.operational_status"
+        params:
+          check: "system_operational == true"
+          severity: "critical"
+      - do: "sensor.validate"
+        target: "system.customer_services.status"
+        params:
+          check: "customer_services_operational == true"
+          severity: "critical"
+      - do: "sensor.validate"
+        target: "system.configuration.status"
+        params:
+          check: "configuration_retained == true"
+          severity: "major"
+      - do: "sensor.validate"
+        target: "system.communications.status"
+        params:
+          check: "communications_normal == true"
+          severity: "major"
+      - do: "log.append"
+        params:
+          message: "Functional validation complete"
+          validation_step: "step_5"
+          result: "${validation_result}"
+
+  validate_redundancy:
+    steps:
+      - do: "sensor.validate"
+        target: "redundancy.capacity.status"
+        params:
+          check: "n_plus_1_capacity_available == true"
+          severity: "critical"
+          allow_na: true
+      - do: "sensor.validate"
+        target: "redundancy.cluster.health"
+        params:
+          check: "cluster_healthy == true"
+          severity: "critical"
+          allow_na: true
+      - do: "sensor.validate"
+        target: "redundancy.ha.status"
+        params:
+          check: "ha_operational == true"
+          severity: "critical"
+          allow_na: true
+      - do: "sensor.validate"
+        target: "redundancy.failover.status"
+        params:
+          check: "failover_available == true"
+          severity: "critical"
+          allow_na: true
+      - do: "log.append"
+        params:
+          message: "Redundancy validation complete"
+          validation_step: "step_6"
+          result: "${validation_result}"
+
+  validate_security:
+    steps:
+      - do: "sensor.validate"
+        target: "security.authentication.status"
+        params:
+          check: "authentication_operational == true"
+          severity: "critical"
+      - do: "sensor.validate"
+        target: "security.mfa.status"
+        params:
+          check: "mfa_operational == true"
+          severity: "critical"
+      - do: "sensor.validate"
+        target: "security.rbac.status"
+        params:
+          check: "rbac_retained == true"
+          severity: "critical"
+      - do: "sensor.validate"
+        target: "security.logging.status"
+        params:
+          check: "security_logging_operational == true"
+          severity: "critical"
+      - do: "log.append"
+        params:
+          message: "Security validation complete"
+          validation_step: "step_7"
+          result: "${validation_result}"
+
+  escalate_immediately:
+    steps:
+      - do: "action.block"
+        params:
+          reason: "Service impact detected during firmware validation"
+      - do: "notify.ops"
+        params:
+          priority: "critical"
+          message: "IMMEDIATE ESCALATION: Firmware validation failure with service impact"
+          include_signals:
+            - "validation.failure_type"
+            - "service_impact.description"
+            - "device.identifier"
+            - "change_record.number"
+      - do: "ticket.create_incident"
+        params:
+          severity: "sev1"
+          title: "Firmware Validation Failure - Service Impact"
+          description: "Automatic escalation triggered during firmware validation"
+      - do: "event.emit"
+        params:
+          event_type: "FirmwareValidationCriticalFailure"
+          escalation_required: true
+      - do: "log.append"
+        params:
+          message: "Immediate escalation triggered"
+          escalation_reason: "${failure_type}"
+
+  apply_corrective_action:
+    steps:
+      - do: "workflow.route"
+        params:
+          route_to: "corrective_action_handler"
+          failure_type: "${validation.failure_type}"
+      - do: "log.append"
+        params:
+          message: "Applying corrective action"
+          failure_type: "${validation.failure_type}"
+          action_taken: "${corrective_action}"
+      - do: "wait.until"
+        params:
+          condition: "corrective_action.complete == true"
+          timeout_minutes: 30
+
+  revalidate:
+    steps:
+      - do: "log.append"
+        params:
+          message: "Revalidating after corrective action"
+          previous_failure: "${validation.failure_type}"
+      - do: "workflow.route"
+        params:
+          route_to: "validation_restart"
+          starting_step: "${failed_validation_step}"
+
+  escalate_to_operations_lead:
+    steps:
+      - do: "notify.ops"
+        params:
+          priority: "major"
+          role: "Operations Lead"
+          message: "Firmware validation failure - Operations Lead guidance required"
+          include_signals:
+            - "validation.failure_type"
+            - "correctable_status"
+            - "device.identifier"
+            - "change_record.number"
+      - do: "approval.request"
+        params:
+          approver_role: "Operations Lead"
+          approval_type: "validation_failure_guidance"
+          timeout_minutes: 60
+      - do: "log.append"
+        params:
+          message: "Operations Lead escalation initiated"
+
+  evaluate_rollback:
+    steps:
+      - do: "sensor.validate"
+        target: "rollback.triggers"
+        params:
+          check_conditions:
+            - "service_outage == true"
+            - "critical_functionality_lost == true"
+            - "monitoring_unavailable == true"
+            - "security_compromised == true"
+            - "redundancy_not_restored == true"
+            - "firmware_cannot_be_validated == true"
+      - do: "workflow.route"
+        params:
+          route_to: "rollback_decision_workflow"
+          trigger_conditions: "${rollback.trigger_conditions}"
+      - do: "log.append"
+        params:
+          message: "Rollback evaluation initiated"
+          trigger_conditions: "${rollback.trigger_conditions}"
+
+  initiate_rollback_review:
+    steps:
+      - do: "action.block"
+        params:
+          reason: "Rollback review required - validation cannot be completed"
+      - do: "notify.ops"
+        params:
+          priority: "critical"
+          roles: ["Operations Lead", "CAB", "OEM Support"]
+          message: "Rollback review initiated for firmware validation failure"
+          include_signals:
+            - "rollback.trigger_type"
+            - "validation.failure_summary"
+            - "device.identifier"
+            - "change_record.number"
+            - "approved_firmware_version"
+            - "current_firmware_version"
+      - do: "approval.request"
+        params:
+          approver_roles: ["Operations Lead", "CAB"]
+          approval_type: "rollback_decision"
+          required_evidence:
+            - "rollback_trigger_documentation"
+            - "validation_failure_screenshots"
+            - "device_logs"
+            - "attempted_corrections"
+      - do: "ticket.create_work_order"
+        params:
+          priority: "critical"
+          title: "Firmware Rollback Review"
+          description: "Rollback evaluation required for failed firmware validation"
+      - do: "log.append"
+        params:
+          message: "Rollback review process initiated"
+          trigger: "${rollback.trigger_type}"
+
+  capture_evidence:
+    steps:
+      - do: "log.append"
+        params:
+          message: "Capturing required validation evidence"
+          evidence_types:
+            - "firmware_version_screenshot"
+            - "device_health_screenshot"
+            - "monitoring_visibility_screenshot"
+            - "alarm_status_screenshot"
+            - "redundancy_status_screenshot"
+            - "validation_checklist"
+            - "mop_checklist"
+            - "change_record_update"
+            - "technician_notes"
+      - do: "workflow.route"
+        params:
+          route_to: "evidence_attachment_workflow"
+          change_record: "${change_record.number}"
+
+  assign_soak_period:
+    steps:
+      - do: "workflow.route"
+        params:
+          route_to: "soak_period_assignment"
+          validation_outcome: "${validation.outcome}"
+          risk_tier: "${calculated_risk_tier}"
+      - do: "log.append"
+        params:
+          message: "Soak period assigned"
+          risk_tier: "${risk_tier}"
+          monitoring_period_hours: "${soak_period.duration_hours}"
+
+  complete_validation:
+    steps:
+      - do: "log.append"
+        params:
+          message: "All validation steps complete"
+          overall_status: "PASS"
+          validation_timestamp: "${timestamp}"
+      - do: "event.emit"
+        params:
+          event_type: "FirmwareValidationComplete"
+          status: "pass"
+
+  approve_change_closure:
+    steps:
+      - do: "sensor.validate"
+        target: "validation.requirements"
+        params:
+          check_conditions:
+            - "all_validation_steps.status == 'pass'"
+            - "soak_period.complete == true"
+            - "required_evidence.attached == true"
+            - "unresolved_risks.documented == true"
+            - "required_approvals.complete == true"
+      - do: "approval.request"
+        params:
+          approver_role: "Operations Lead"
+          approval_type: "change_closure"
+          required_when:
+            - "validation.outcome == 'FAIL'"
+            - "validation.outcome == 'Extended Monitoring'"
+            - "validation.outcome == 'Rollback Review'"
+      - do: "log.append"
+        params:
+          message: "Change closure approved"
+          final_status: "${validation.final_status}"
+      - do: "event.emit"
+        params:
+          event_type: "FirmwareChangeClosureApproved"
+          change_record: "${change_record.number}"
+
+alarm_matrix:
+  - point_name: "device.firmware.installation_error"
+    description: "Firmware installation failed or completed with errors"
+    severity: Critical
+    auto_action: "escalate_immediately"
+    escalation: "Operations Lead -> CAB -> OEM Support"
+  
+  - point_name: "device.health.new_fault"
+    description: "New hardware or controller fault detected post-firmware update"
+    severity: Major
+    auto_action: "apply_corrective_action"
+    escalation: "Operations Lead if persistent"
+  
+  - point_name: "monitoring.visibility.lost"
+    description: "Device no longer visible in DCIM, EPMS, or BMS"
+    severity: Critical
+    auto_action: "escalate_immediately"
+    escalation: "Operations Lead -> Monitoring Team"
+  
+  - point_name: "alarm.critical.unexpected"
+    description: "Unexpected critical alarm triggered post-firmware update"
+    severity: Critical
+    auto_action: "escalate_immediately"
+    escalation: "Operations Lead"
+  
+  - point_name: "system.service_impact"
+    description: "Customer services or system operation impacted"
+    severity: Critical
+    auto_action: "escalate_immediately"
+    escalation: "Operations Lead -> CAB -> Executive"
+  
+  - point_name: "redundancy.capacity.loss"
+    description: "N+1 redundancy, HA, or failover capability lost"
+    severity: Critical
+    auto_action: "escalate_immediately"
+    escalation: "Operations Lead"
+  
+  - point_name: "security.control.failure"
+    description: "Authentication, MFA, RBAC, or logging failure detected"
+    severity: Critical
+    auto_action: "escalate_immediately"
+    escalation: "Operations Lead -> Security Team"
+  
+  - point_name: "rollback.failed"
+    description: "Firmware rollback attempt failed"
+    severity: Critical
+    auto_action: "escalate_immediately"
+    escalation: "Operations Lead -> CAB -> OEM Support -> Executive"
+
+observability:
+  kpis:
+    - name: "firmware_validation_success_rate"
+      expr: "count(validation.status == 'pass') / count(validation.total) * 100"
+    
+    - name: "firmware_validation_time_minutes"
+      expr: "timestamp(validation.complete) - timestamp(validation.start)"
+    
+    - name: "corrective_actions_required"
+      expr: "count(corrective_action.applied)"
+    
+    - name: "immediate_escalations"
+      expr: "count(escalation.type == 'immediate')"
+    
+    - name: "rollback_reviews_initiated"
+      expr: "count(rollback_review.initiated)"
+    
+    - name: "change_closure_time_hours"
+      expr: "(timestamp(change.closed) - timestamp(validation.complete)) / 3600"
+    
+    - name: "soak_period_incidents"
+      expr: "count(soak_period.abnormal_conditions)"
+    
+    - name: "evidence_attachment_compliance"
+      expr: "count(evidence.all_required_attached) / count(validations.total) * 100"
+
+audit:
+  approvals:
+    required: true
+    approval_types:
+      - type: "change_record_approval"
+        required_before: "validation_start"
+        approver_roles: ["CAB"]
+      - type: "validation_failure_guidance"
+        required_when: "validation.outcome == 'fail' && correctable == false"
+        approver_roles: ["Operations Lead"]
+      - type: "rollback_decision"
+        required_when: "rollback_review.initiated == true"
+        approver_roles: ["Operations Lead", "CAB"]
+      - type: "security_clearance"
+        required_when: "security.control.failure == true"
+        approver_roles: ["Security Team"]
+      - type: "change_closure"
+        required_when: "validation.outcome in ['FAIL', 'Extended Monitoring', 'Rollback Review']"
+        approver_roles: ["Operations Lead"]
+  ticketing:
+    require_ticket: true
+    ticket_types:
+      - type: "change_record"
+        create_when: "always"
+        required_fields: ["approved_firmware_version", "device_identifier", "maintenance_window"]
+      - type: "incident"
+        create_when: "service_impact == true"
+        severity: "sev1"
+      - type: "work_order"
+        create_when: "rollback_review.initiated == true"
+        priority: "critical"
+  evidence_requirements:
+    - "firmware_version_screenshot"
+    - "device_health_screenshot"
+    - "monitoring_visibility_screenshot"
+    - "alarm_status_screenshot"
+    - "redundancy_status_screenshot"
+    - "validation_checklist_completed"
+    - "mop_checklist_completed"
+    - "change_record_final_update"
+    - "technician_notes_documented"
+  retention_period_years: 7
+  stop_work_authority: true
