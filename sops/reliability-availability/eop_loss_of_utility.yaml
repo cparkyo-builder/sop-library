@@ -1,0 +1,154 @@
+# =============================================================================
+# Emergency Operating Procedure (EOP) — as code
+# Loss of Utility Power (companion to eop_utility_source_loss)
+# -----------------------------------------------------------------------------
+# Digitized from
+#   sop-v12/NA_US_GA10_OPS_EOP_LOSS OF UTILITY.docx
+#
+# NOTE: overlaps eop_utility_source_loss (30.0001). This v1.0 draft is narrower —
+# it assumes a total (non-catastrophic) loss and focuses on verifying the
+# automatic utility→generator transfer and the return-to-normal on restoration.
+# During governance, reconcile the two; 30.0001 is the broader/newer authority.
+# =============================================================================
+
+eop:
+  schema_version: "1.0"
+
+  # Ownership scope (design §9-Q5): GA10 → acme-grid tenant, private.
+  owner:
+    tenant_id: "acme-grid"
+    site_id: ""
+
+  metadata:
+    title: "Loss of Utility Power"
+    type: "EOP"
+    version: "1.0"
+    document_state: "Draft"
+    file_name: "NA_US_GA10_OPS_EOP_20.1005_Loss of Utility Power"
+    procedure_number: "NA_US_GA10_OPS_EOP_20.XXXX_Loss of Utility Power"
+    responsible_owner: "Site Manager / Responsible OE"
+    approved_by_cab: "Senior Person Approval"
+    cab_ticket_number: null
+    language: "English"
+    security_classification: "TBD"
+    modified: "2026-07-07"
+    domain: "Data Center Operations"
+    sites_designation: "GA10"
+    supersedes_note: "Companion to EOP 30.0001; reconcile during governance."
+
+  trigger:
+    condition: "Total loss of utility power from the provider (upstream of the data center)."
+    fault_pattern: "utility_source_loss"
+    equipment_types: [FeederType, ATSType]
+    related_types: [GeneratorSetType, UPSType]
+    key_data_points:
+      - "AASB main utility breaker 52-UM status"
+      - "Generator online status / tie breaker status"
+      - "UPS mode (Normal/Online vs Battery)"
+
+  scope: >
+    Emergency response for a predicted/previously-experienced total loss of utility
+    power. Covers automatic and possible manual actions to transfer load to
+    emergency generators, verification that systems responded correctly, and
+    return-to-normal on restoration. Does NOT cover external casualty operations
+    (fire, flooding, spills, natural disasters).
+
+  systems_in_scope:
+    - id: AASB
+      name: "Advanced Automatic Switchboard (AASB)"
+      operated: true
+    - id: GCP
+      name: "Generator Control Panel (GCP)"
+      operated: true
+    - id: MBS
+      name: "Maintenance Bypass Switchboard (MBS)"
+      operated: false
+      note: "Not operated during this procedure."
+    - id: UPS
+      name: "Uninterruptible Power Supply (UPS) System"
+      operated: false
+      note: "Not operated during this procedure (responds automatically)."
+
+  precautions:
+    - >
+      In normal configuration, a loss or fault in utility power opens the AASB main
+      utility breaker (52-UM); associated UPSs in Normal (Online) Mode automatically
+      shift to Battery Mode to power critical loads until generators come online.
+    - >
+      Generator capacity margin is limited: loss of a single generator within an
+      enclosure could exceed available generator capacity. (Verify per-site ratings.)
+    - >
+      Once generators come online, UPSs automatically shift back to Normal (Online)
+      Mode and begin recharging batteries.
+    - >
+      Generators should come online in < 30 seconds so UPS battery discharge is
+      minimized.
+
+  # ===========================================================================
+  # EMERGENCY RESPONSE
+  # ===========================================================================
+  response:
+    - id: 1
+      type: communicate
+      instruction: "INITIATE the Escalation Procedure, as appropriate."
+    - id: 2
+      type: document
+      instruction: >
+        OPEN an Incident Work Order in CMMS when possible. May be performed
+        concurrently with other steps provided it does not interfere with recovery.
+    - id: 3
+      type: verify
+      instruction: "VERIFY all generators have come online and UPSs have returned to Normal (Online) Mode."
+    - id: 4
+      type: verify
+      instruction: "VERIFY that critical loads are in a stable operating condition."
+    - id: 5
+      type: communicate
+      instruction: "INFORM the OCC and Facilities Management of site conditions."
+    - id: 6
+      type: monitor
+      instruction: >
+        COMMENCE hourly running checks and recording readings on all operating
+        generators using the Generator Hourly Reading log sheet.
+      reference_sop: "NA_US_GA10_OPS_SOP_30.XXXX_Generator Pre-Run/Running/Post-Run Checks"
+    - id: 7
+      type: document
+      instruction: "INITIATE incident report as appropriate."
+
+  # ===========================================================================
+  # RESTORATION OF UTILITY POWER
+  # ===========================================================================
+  restoration:
+    - id: 1
+      type: verify
+      instruction: "At all AASBs, VERIFY Utility Main circuit breakers are Closed and Generator Tie circuit breakers are Open."
+    - id: 2
+      type: verify
+      instruction: "At all UPSs, VERIFY they have returned to Normal (Online) Mode."
+    - id: 3
+      type: verify
+      instruction: "VERIFY all generators have gone into cooldown mode and shut down."
+    - id: 4
+      type: verify
+      instruction: "VERIFY all generator TCC circuit breakers and Generator Output circuit breakers are Open."
+    - id: 5
+      type: action
+      instruction: "PERFORM Generator Post-Run Checks."
+      reference_sop: "NA_US_GA10_OPS_SOP_30.XXXX_Generator Pre-Run/Running/Post-Run Checks"
+    - id: 6
+      type: verify
+      instruction: "VERIFY Power Control monitoring has connection to the system and all faults have cleared."
+    - id: 7
+      type: verify
+      instruction: "VERIFY with the NOC operator that all faults have cleared."
+    - id: 8
+      type: communicate
+      instruction: "INFORM the NOC and Facilities Management of site conditions."
+
+  signoff:
+    eop_supervisor:
+      name: null
+      title: null
+      signature: null
+      date: null
+    comments_lessons_learned: null

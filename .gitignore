@@ -1,2 +1,5 @@
 .DS_Store
 **/.DS_Store
+
+# Source reference material — third-party and customer documents, not for version control
+sops/references/

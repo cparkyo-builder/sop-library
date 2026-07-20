@@ -1,0 +1,29 @@
+{
+  "_comment": "External MoP/EoP authorization records — the SOURCE OF TRUTH is the site change-management / CAB system, NOT this app. This file (and POST /api/authorizations) is how those external decisions are provided to the FDD app as data. The app reads these to show whether a grounded MoP/EoP recommendation is already authorized to execute; it never creates or approves them. Fields (status, cab_ticket, approved_by, source, validity) are copied verbatim from the external system.",
+  "authorizations": [
+    {
+      "id": "AUTH-2026-0714-001",
+      "procedure_id": "NA_US_XXXX_OPS_EOP_XX.XXXX_Loss_of_Cooling",
+      "status": "approved",
+      "site_id": "dc-pa-01",
+      "equipment_id": "",
+      "rule_id": "",
+      "cab_ticket": "CHG-2026-8842",
+      "approved_by": "J. Rivera (CAB Chair)",
+      "source": "ServiceNow Change Management",
+      "granted_at": "2026-07-14T15:20:00Z",
+      "valid_from": "2026-07-14T00:00:00Z",
+      "valid_until": "2026-12-31T23:59:59Z"
+    },
+    {
+      "id": "AUTH-2026-0716-004",
+      "procedure_id": "NA_US_GA10_OPS_EOP_30.0001_Utility_Source_Loss_Single_Both_Feeds",
+      "status": "pending",
+      "site_id": "dc-ga-01",
+      "cab_ticket": "CHG-2026-8910",
+      "approved_by": "",
+      "source": "ServiceNow Change Management",
+      "granted_at": "2026-07-16T09:05:00Z"
+    }
+  ]
+}
