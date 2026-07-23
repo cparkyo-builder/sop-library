@@ -1,0 +1,215 @@
+# =============================================================================
+# Fault-Response Runbook — as code
+# Chiller Plant: Low Water Flow (P1 BMS Alarm)
+# -----------------------------------------------------------------------------
+# Digitized from
+#   sop-v12/Simulated Chiller Low Water Flow Fault Procedure .docx
+#   (+ companion process-flow: sop-v12/CHILLER Low Pressure Fault Process Flow.pdf)
+#
+# A `fault_response:` runbook is a diagnostic/triage playbook (not a switching
+# procedure). It is the richest grounding source for the agent's REASON + RECOMMEND
+# stages: `possible_causes` grounds root-cause reasoning; `corrective_action_tree`
+# grounds the recommended action plan; `severity_model` grounds SEV classification.
+#
+#   trigger            : alarm/fault this runbook answers (ties to FDD register)
+#   immediate_response : first-minutes acknowledge + incident-open actions
+#   remote_investigation: validate via BMS/EMS/DCIM before touching equipment
+#   severity_model     : SEV1/2/3 decision criteria (start high, downgrade on evidence)
+#   possible_causes    : cause -> what-to-check (root-cause candidate set)
+#   field_investigation: safe field checks (PPE/LOTO gated)
+#   corrective_action_tree : condition -> corrective actions (recommendation source)
+#   escalation         : per-severity escalation + vendor-callout triggers
+#   ticketing          : incident record lifecycle
+# =============================================================================
+
+fault_response:
+  schema_version: "1.0"
+
+  metadata:
+    title: "Simulated Low Water Flow P1 Alarm on Chiller Plant"
+    type: "FaultResponse"
+    document_state: "Draft"
+    domain: "Data Center Operations — Mechanical/Cooling"
+    sites_designation: "GA10"
+    controlling_documents: >
+      Site-specific York chiller SOP/EOP, electrical safety program, LOTO
+      requirements, and PPE matrix are the authoritative references for all actions.
+
+  trigger:
+    condition: "Priority 1 BMS alarm — Low Water Flow on a production chiller plant."
+    fault_pattern: "chiller_low_water_flow"
+    # Explicit rule → procedure map (design §4.4 / §9-Q2). These FDD rule_ids are
+    # remediated by THIS triage runbook; the strongest retrieval signal, overriding
+    # equipment/class heuristics. Governed here with the procedure.
+    remediates: [CHL-FD-004, CHL-FD-001, PMP-FD-002, PMP-FD-001, LCS-FD-002, LCS-FD-005, LCS-FD-006]
+    equipment_types: [Chiller]
+    related_types: [Chilled_Water_Pump, Condenser_Water_Pump, Chilled_Water_System]
+    example_asset: "York 1000 kW Chiller 2 Plant"
+    initial_severity: "SEV1 (Critical) until validated"
+    why_it_matters: >
+      Low water flow may indicate inadequate evaporator/condenser flow. If confirmed
+      it can lead to chiller trip, freeze risk, high head pressure, reduced cooling
+      capacity, or loss of redundancy.
+    key_data_points:
+      - "Evaporator / condenser flow meter reading"
+      - "Flow switch status"
+      - "Loop differential pressure"
+      - "CHW supply/return temperatures"
+      - "Pump run proof / VFD speed / motor amps"
+      - "Data hall temperature trend"
+
+  # ---------------------------------------------------------------------------
+  immediate_response:
+    - id: 1
+      type: action
+      window: "By T+5 min"
+      instruction: "ACKNOWLEDGE the BMS/EMS/DCIM alarm."
+    - id: 2
+      type: document
+      instruction: "OPEN an incident ticket immediately."
+    - id: 3
+      type: record
+      instruction: "RECORD alarm time, response time, system, alarm, priority, initial severity (SEV1 pending validation), current chiller status, plant lineup, data-hall temperature status, redundancy status, and simultaneous alarms."
+
+  remote_investigation:
+    preface: "Validate the alarm through BMS/EMS/DCIM BEFORE touching equipment."
+    areas:
+      - area: "Chiller status"
+        verify: "Running/stopped/tripped/locked-out/commanded-off; shutdown on low flow; York panel alarms; restart availability; local/remote/auto/manual mode."
+      - area: "Pump status"
+        verify: "Affected CHW/CW loop; run command/proof; VFD status; speed reference vs actual; motor amps; faults/overloads; starter/VFD alarms; lead/lag and standby availability."
+      - area: "Flow and pressure"
+        verify: "Flow meter reading; flow switch status; loop DP; CHW supply/return temps; condenser water temps; trend changes; gradual vs sudden drop."
+      - area: "Valve and controls"
+        verify: "Isolation/bypass/control valve positions; actuator command vs feedback; closed valves preventing flow; BAS sequence command; interlocks preventing flow proof."
+      - area: "Site impact"
+        verify: "Data-hall temp trend; CRAH/CRAC coil valve positions; supply/return air temps; cooling load; related alarms; remaining chiller capacity; redundancy status."
+
+  severity_model:
+    guidance: "P1 alarm — start high and downgrade only after validation."
+    levels:
+      - level: "SEV1 — Critical"
+        use_when: >
+          Chiller tripped with active cooling impact; data-hall temps rising or near
+          threshold; remaining plant cannot carry load; redundancy lost and load at
+          risk; multiple chillers/pumps affected; real flow loss not quickly
+          restorable; safety/equipment-damage risk; leak/electrical/pump/controls
+          failure impacts plant operation.
+      - level: "SEV2 — Major / Loss of Redundancy"
+        use_when: >
+          Chiller unavailable but site stable; N+1/intended redundancy lost; cooling
+          maintained by other chillers; no immediate data-hall impact but resiliency
+          degraded; vendor repair needed to restore redundancy.
+      - level: "SEV3 — Non-Critical"
+        use_when: >
+          Alarm confirmed false/nuisance; independent readings show normal flow; no
+          impact to chiller operation; no redundancy loss; no thermal risk; limited
+          to sensor, BAS point, or communications anomaly.
+
+  # Root-cause candidate set — grounds the agent's DIAGNOSE stage.
+  possible_causes:
+    - cause: "Chilled/condenser water pump failed"
+      category: "Pump issue"
+      check: "Pump status, run proof, motor amps, VFD fault"
+    - cause: "VFD tripped, failed, disabled, or speed command lost"
+      category: "VFD issue"
+      check: "VFD alarm, reset status, speed reference, local display"
+    - cause: "Breaker trip, overload, starter issue, control-power loss"
+      category: "Electrical issue"
+      check: "MCC, breaker, overload, control voltage"
+    - cause: "Isolation valve closed or actuator failed"
+      category: "Valve issue"
+      check: "Valve command, feedback, physical position"
+    - cause: "BAS command failed, sequence issue, point mapping problem"
+      category: "Controls issue"
+      check: "BMS command/status mismatch, recent control changes"
+    - cause: "Flow switch/transmitter failed or out of calibration"
+      category: "Sensor issue"
+      check: "Local flow indication, DP readings, wiring, tubing"
+    - cause: "Y-strainer or basket strainer clogged"
+      category: "Strainer blockage"
+      check: "DP across strainer, maintenance history"
+    - cause: "Airlock or insufficient venting"
+      category: "Air in system"
+      check: "Pump noise, unstable pressure, air separator, vents"
+    - cause: "Makeup water issue or leak"
+      category: "Low water level/pressure"
+      check: "Expansion tank, makeup water, pressure trend, visible leaks"
+    - cause: "Evaporator/condenser fouling reducing flow"
+      category: "Fouled heat exchanger"
+      check: "Pressure drop, approach temperatures, maintenance data"
+    - cause: "Bypass valve open or failed, reducing proven flow"
+      category: "Bypass issue"
+      check: "Bypass valve command/feedback, loop DP"
+    - cause: "Chiller called without proper pump/valve sequence"
+      category: "Incorrect plant lineup"
+      check: "Lead/lag logic, interlocks, manual overrides"
+    - cause: "Valve left closed, pump isolated, sensor disturbed"
+      category: "Recent maintenance"
+      check: "Work orders, lockout tags, operator logs"
+    - cause: "BMS lost signal or stale value"
+      category: "Communications issue"
+      check: "Controller status, network faults, point quality"
+    - cause: "York panel detecting flow failure"
+      category: "Chiller internal protection"
+      check: "Local chiller panel alarm and event history"
+
+  field_investigation:
+    before_entering:
+      - "Review applicable SOP/EOP; wear required PPE; use electrical safety practices."
+      - "Do not open energized electrical equipment unless trained and authorized; follow LOTO if maintenance/repair requires it."
+      - "Do not reset repeatedly without understanding the cause; use buddy/escalation support if site procedure requires."
+    at_equipment:
+      - "Check chiller local panel alarm history; verify Chiller enabled or locked out."
+      - "Inspect pump/VFD local status; look for abnormal noise, vibration, cavitation, overheating, or leaks."
+      - "Verify valve physical positions; check strainers or DP indicators; review water pressure gauges."
+      - "Confirm whether the flow switch is physically made; look for recent maintenance or manual-override signs."
+
+  # Condition -> corrective actions — grounds the agent's RECOMMEND stage.
+  corrective_action_tree:
+    - condition: "Pump is off or tripped"
+      actions:
+        - "Verify whether pump should be running; check for VFD/starter fault."
+        - "Reset ONLY if allowed by SOP and safe; restart pump if authorized."
+        - "Confirm flow proof returns; monitor for recurrence."
+    - condition: "Standby pump is available"
+      actions:
+        - "Place failed pump out of service if required; start standby pump per SOP."
+        - "Confirm stable flow; update incident ticket; escalate as SEV2 if redundancy is degraded."
+    - condition: "Valve is closed or failed"
+      actions:
+        - "Confirm commanded vs actual position; restore proper valve lineup if safe and allowed."
+        - "Call controls/mechanical vendor if actuator failed; maintain cooling with alternate equipment."
+    - condition: "Strainer appears clogged"
+      actions:
+        - "Do NOT open pressurized components without LOTO/isolation/drain procedure."
+        - "Escalate to mechanical maintenance or vendor; maintain cooling through redundant equipment; document suspected restriction."
+    - condition: "Sensor or BAS point appears failed"
+      actions:
+        - "Validate using independent local readings; classify lower only if actual flow is normal and no risk exists."
+        - "Open controls/BAS repair task or vendor callout; do not ignore alarm unless alternate validation confirms safe operation."
+    - condition: "Chiller has internal York fault"
+      actions:
+        - "Check York panel; record exact fault code/message; follow York SOP/EOP."
+        - "Do NOT repeatedly reset if safety trips again; call York vendor if fault does not clear or cause is not safely correctable."
+
+  escalation:
+    internal:
+      - severity: "SEV1"
+        path: "Operations leadership, critical-environment manager, facilities manager, site leadership, and network/customer-impact path if applicable."
+      - severity: "SEV2"
+        path: "Facilities/operations leadership and maintenance planning (loss of redundancy)."
+      - severity: "SEV3"
+        path: "Normal maintenance or controls follow-up."
+    vendor_callout_when:
+      - "Chiller fault remains active (will not reset; York panel shows active safety fault)."
+      - "Mechanical/electrical repair needed (pump/VFD failure; strainer or heat-exchanger work)."
+      - "Controls/instrumentation repair needed (actuator failed; flow switch/transmitter replace/calibrate)."
+      - "Technician cannot safely resolve or validate; repair exceeds technician authorization."
+
+  ticketing:
+    opening: "Alarm time; asset; alarm; initial severity (SEV1 pending validation); responder; BMS screenshots; plant conditions; IT/load impact; redundancy state."
+    update_when:
+      - "SEV level changes; chiller trips or recovers; plant lineup changes."
+      - "Standby pump/chiller starts; vendor called/arrives; root cause changes."
+      - "Repair completes; alarm clears; redundancy restored; monitoring confirms stable operation."

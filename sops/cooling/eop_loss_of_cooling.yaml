@@ -1,0 +1,259 @@
+# =============================================================================
+# Emergency Operating Procedure (EOP) — as code
+# Total / Partial Loss of Cooling (Air-Cooled and Liquid-to-Chip)
+# -----------------------------------------------------------------------------
+# AUTHORED to fill the corpus gap identified in sop-v12/catalog.yaml:
+#   "EoP coverage is power-only; no cooling/mechanical EoP (e.g. total loss of
+#    cooling)." (See ce-fdd-cognitive-agent-design.md §9-Q1.)
+#
+# PROVENANCE: not digitized from a source document — authored from the CE-FDD
+# design basis and domain standards (ASHRAE TC9.9 thermal envelopes, the liquid-
+# cooling design basis in critical-equipment-fdd-agent/references/). Document_state
+# is Draft: it MUST be reviewed and approved by site engineering + CAB before use,
+# and per-site thresholds/lineups filled in. It intentionally mirrors the `eop:`
+# schema of eop_utility_source_loss so the ProcedureStore treats it identically.
+#
+# WHY THIS EOP IS DISTINCT FROM A POWER EOP: thermal runaway is fast and gets
+# faster with density. Air-cooled data halls have minutes of ride-through; direct-
+# to-chip / AI racks (Prime-Hanwha, NVIDIA DSX) can exceed safe die temperature in
+# SECONDS once coolant flow is lost, so the response prioritizes immediate load
+# management over lengthy diagnosis.
+# =============================================================================
+
+eop:
+  schema_version: "1.0"
+
+  metadata:
+    title: "Total / Partial Loss of Cooling (Air-Cooled and Liquid-to-Chip)"
+    type: "EOP"
+    version: "0.1"
+    document_state: "Draft — authored to fill gap; requires site + CAB review"
+    file_name: "NA_US_XXXX_OPS_EOP_XX.XXXX_Loss_of_Cooling"
+    procedure_number: "NA_US_XXXX_OPS_EOP_XX.XXXX_Loss_of_Cooling"
+    author: "CE-FDD design (authored draft)"
+    responsible_owner: "Site Manager / Critical Environment Manager"
+    approved_by_cab: null
+    cab_ticket_number: null
+    language: "English"
+    security_classification: "For Internal Use Only"
+    next_review_due: null
+    modified: null
+    domain: "Data Center Operations — Mechanical/Cooling"
+    sites_designation: "Fleet (air-cooled and liquid-to-chip); fill per site"
+    estimated_time: "Event-driven; monitor until cooling restored and thermals stable."
+
+  trigger:
+    condition: >
+      Loss of cooling to one or more data halls / IT loops: multiple chiller or CDU
+      trips, loss of chilled-water or facility-water flow across the plant,
+      sustained rising data-hall or coolant supply temperatures, or loss of the
+      last redundant cooling path (N+1 -> N-1).
+    fault_pattern: "loss_of_cooling"
+    # Explicit rule → procedure map (design §4.4 / §9-Q2): cooling-EMERGENCY rules
+    # (leak, chiller trip risk, dew-point, CDU N+1 loss, pH) escalate to this EoP.
+    # Flow-degradation rules map to the triage runbook instead (fault_chiller_low_water_flow).
+    remediates: [CHL-FD-002, CHL-FD-003, TWR-FD-001, TWR-FD-002, LCS-FD-001, LCS-FD-003, LCS-FD-004, LCS-FD-007, LCS-FD-008]
+    equipment_types: [Chiller, Chilled_Water_System, Coolant_Distribution_Unit]
+    related_types:
+      [Chilled_Water_Pump, Condenser_Water_Pump, Cooling_Tower, Direct_To_Chip_Rack, Air_Handling_Unit]
+    key_data_points:
+      - "Data-hall temperature and rate-of-rise (deg/min)"
+      - "CHW supply/return temperature and loop DP"
+      - "Facility Water System (FWS) supply temp, flow, and pressure (liquid sites)"
+      - "CDU secondary (TCS) supply temp, coolant flow, loop DP, dew-point margin (liquid sites)"
+      - "Chiller / CDU / pump run state and available redundancy (N+1 status)"
+      - "IT / compute load and any leak-detection status (liquid sites)"
+
+  scope: >
+    Immediate response to a partial or total loss of cooling. Covers recognition,
+    protection of IT load and personnel, rapid assessment of remaining cooling
+    capacity and redundancy, coordinated thermal/load management to stay within the
+    ASHRAE TC9.9 envelope, escalation, monitoring, and controlled restoration. Air-
+    cooled and liquid-to-chip response paths are both included; execute the branch
+    matching the affected system.
+
+  precautions:
+    - >
+      This EOP is for emergency stabilization, thermal/load management, monitoring,
+      communication, and documentation. Do NOT force chiller/CDU restarts, override
+      interlocks, reset protective trips, or perform energized/pressurized work
+      unless directed by an approved MOP/switching order and qualified authority.
+    - >
+      LIQUID SITES: treat any coolant leak as a combined electrical + thermal
+      hazard. Do NOT open pressurized coolant components without LOTO/isolation/drain.
+      Watch dew-point margin — restoring cold coolant into a warm hall can cause
+      condensation on live IT hardware.
+    - >
+      Thermal runaway accelerates with rack density. For direct-to-chip / AI racks,
+      seconds matter: coordinate IT load shed EARLY rather than waiting for a full
+      root-cause diagnosis.
+    - >
+      Preserve evidence: alarms, timestamps, temperature/flow/DP trends, equipment
+      states, leak indications, screenshots, and communications.
+    - >
+      Escalate immediately for loss of the last cooling path, data-hall temp
+      approaching the high threshold, any coolant leak on energized racks, or loss
+      of BMS/EPMS/DCIM visibility.
+
+  affected_equipment:
+    - type: "Mechanical / Cooling"
+      items:
+        - "Chillers, CHW/CW pumps, cooling towers, AHUs/CRAHs (air-cooled path)"
+        - "Facility Water System, CDUs, direct-to-chip cabinets, leak detection (liquid path)"
+        - "BMS/EPMS/DCIM monitoring points"
+      location: "Central plant, mechanical rooms, data halls, and monitoring platforms; fill per site."
+
+  safety_requirements:
+    - "Prioritize life safety; keep personnel clear of energized/pressurized equipment unless qualified and assigned."
+    - "Establish an operations lead, a communications lead, and a mechanical response lead; engage IT/compute owner early for load coordination."
+    - "Use task-appropriate PPE; follow LOTO for any pressurized coolant or energized work."
+    - "Maintain data-hall access, plant access, and control-room communication."
+    - "Move to the applicable companion EOP if a coolant leak on energized racks, power event, or fire/smoke condition is involved."
+
+  # ===========================================================================
+  # EMERGENCY RESPONSE SEQUENCE
+  # ===========================================================================
+  response:
+    - id: 1
+      type: action
+      instruction: >
+        RECOGNIZE the event from BMS/EPMS/DCIM/OCC alarms: chiller/CDU trips, loss
+        of flow or DP, rising hall or coolant supply temperature, or leak detection.
+    - id: 2
+      type: communicate
+      instruction: >
+        ANNOUNCE the event to Shift Lead / Operations Manager and declare scope:
+        which hall(s)/loop(s), air vs liquid path, and whether cooling is partially
+        or fully lost.
+    - id: 3
+      type: action
+      instruction: >
+        PROTECT IT load and personnel. Alert the compute/IT owner immediately that a
+        cooling event is in progress and thermal/load action may be required.
+    - id: 4
+      type: document
+      instruction: >
+        CAPTURE initial evidence: alarm names, timestamps, affected halls/loops,
+        temperatures and rate-of-rise, CHW/FWS/TCS flow-DP-temp, equipment states,
+        redundancy status, and any leak indication.
+    - id: 5
+      type: verify
+      instruction: >
+        ASSESS remaining cooling capacity and redundancy: how many chillers/CDUs/
+        pumps remain, whether standby (N+1) units are available and healthy, and
+        estimated time to threshold at the current rate-of-rise.
+    - id: 6
+      type: decision
+      condition: "air_cooled_path"
+      instruction: >
+        AIR PATH — verify CHW flow and loop DP; confirm CRAH/AHU fans and coil valve
+        positions; start/confirm standby chiller and CHW/CW pumps per SOP; investigate
+        pump/chiller performance if DP is low. Ground detailed diagnosis in the
+        chiller fault-response runbook.
+      reference: "fault_chiller_low_water_flow"
+    - id: 7
+      type: decision
+      condition: "liquid_to_chip_path"
+      instruction: >
+        LIQUID PATH — verify FWS (primary) supply temp/flow/pressure and CDU
+        secondary (TCS) coolant flow, supply temp, loop DP, and dew-point margin;
+        confirm per-pod CDU N+1 pump state; check leak detection. Start/confirm
+        standby CDU/pump per SOP. Manage dew-point margin on restoration to avoid
+        condensation on energized hardware.
+    - id: 8
+      type: decision
+      condition: "temp_approaching_threshold OR last_cooling_path_lost"
+      escalate_to: "IT load-shed coordination"
+      instruction: >
+        IF hall/coolant temperature is approaching the high threshold or the last
+        cooling path is lost, COORDINATE with the IT/compute owner to shed or throttle
+        non-critical compute load to reduce heat generation. For direct-to-chip / AI
+        racks, initiate this early — thermal ride-through is measured in seconds.
+    - id: 9
+      type: communicate
+      instruction: >
+        START incident bridge / emergency communications. Notify Operations
+        leadership, mechanical support, facility leadership, OCC/NOC/customer path,
+        and cooling vendor as required.
+    - id: 10
+      type: monitor
+      instruction: >
+        MONITOR temperature, rate-of-rise, flow/DP, and (liquid) dew-point margin and
+        leak status continuously until cooling is restored and thermals stabilize.
+    - id: 11
+      type: verify
+      instruction: >
+        VERIFY no concurrent events compound the loss: power event feeding the plant,
+        a coolant leak on energized racks, fire/smoke, or BMS/EPMS/DCIM visibility
+        loss. Initiate companion EOPs if present.
+    - id: 12
+      type: communicate
+      instruction: >
+        COMMUNICATE status at defined intervals: halls/loops affected, cooling state,
+        temperature trend, load actions taken, known impacts, open risks, next
+        actions, and owner assignments.
+    - id: 13
+      type: action
+      requires_authority: true
+      instruction: >
+        DO NOT force equipment restarts, override interlocks, reset protective trips,
+        or open pressurized/energized components unless directed by approved
+        authority and written MOP/emergency scope.
+    - id: 14
+      type: document
+      instruction: >
+        DOCUMENT the full event log and CREATE corrective work orders for equipment
+        anomalies, sequence/redundancy concerns, sensor/metering gaps, and any
+        deferred repairs.
+
+  warning: >
+    Loss of cooling is a fast-moving thermal event and worsens with rack density.
+    For direct-to-chip / AI racks, coolant-flow loss can exceed safe die temperature
+    in seconds — prioritize IT load management over lengthy diagnosis. Do not
+    improvise restarts, override interlocks, or introduce cold coolant into a warm
+    hall without managing dew-point margin.
+
+  # ===========================================================================
+  # BACK-OUT / STABILIZATION
+  # ===========================================================================
+  backout:
+    trigger: >
+      Commence immediately if cooling state, redundancy, temperature trend, leak
+      status, personnel safety, or IT-load condition is unclear or unstable.
+    procedures:
+      - "Hold the current safe mechanical state; prevent unauthorized restarts or resets."
+      - "Maintain incident command/bridge; keep mechanical authority and Operations leadership engaged until thermals are stable."
+      - "If temperature continues to rise with no available cooling path, execute the approved IT load-shed / graceful-shutdown plan to protect hardware."
+      - "Liquid sites: if a leak is on energized racks, isolate the affected loop per LOTO and coordinate with the electrical response lead before restoring coolant."
+      - "Delay return-to-normal until cooling capacity, redundancy, and (liquid) dew-point margin are confirmed acceptable by mechanical authority."
+
+  # ===========================================================================
+  # RESTORATION READINESS
+  # ===========================================================================
+  restoration:
+    - id: 1
+      type: verify
+      instruction: "VERIFY restored cooling path is stable: chiller/CDU running, flow and loop DP within band, supply temperature recovering."
+    - id: 2
+      type: verify
+      instruction: "LIQUID: VERIFY dew-point margin is safe before ramping cold coolant into the hall; confirm no active leak."
+    - id: 3
+      type: verify
+      instruction: "VERIFY data-hall temperatures are returning toward the ASHRAE envelope and rate-of-rise has reversed."
+    - id: 4
+      type: action
+      instruction: "COORDINATE with IT to restore any shed/throttled compute load in a controlled ramp as thermal headroom returns."
+    - id: 5
+      type: verify
+      instruction: "VERIFY redundancy (N+1) is re-established or a plan exists to restore it; confirm all faults cleared with OCC/NOC."
+    - id: 6
+      type: communicate
+      instruction: "INFORM OCC/NOC, Facilities Management, and customer path of restored conditions."
+
+  signoff:
+    eop_supervisor:
+      name: null
+      title: null
+      signature: null
+      date: null
+    comments_lessons_learned: null

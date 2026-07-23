@@ -1,0 +1,273 @@
+# =============================================================================
+# Emergency Operating Procedure (EOP) — as code
+# Utility Source Loss (Single / Both Feeds)
+# -----------------------------------------------------------------------------
+# Structured, machine-readable representation of the source EOP, digitized from
+#   sop-v12/EOP DRAFTS/NA_US_GA10_OPS_EOP_30.0001_Utility_Source_Loss_Single_Both_Feeds_ATTACHMENT_FORMAT.docx
+#
+# The `eop:` schema mirrors the sop:/mop: conventions but is shaped for an
+# emergency response rather than planned work:
+#   metadata            : document control fields
+#   trigger             : the detected condition(s) that invoke this EOP (ties to
+#                         the FDD alarm/fault register so the agent can select it)
+#   description / scope : what the EOP covers and its assumptions
+#   precautions         : do-not-do hazard boundaries during the event
+#   affected_equipment  : systems in the emergency scope
+#   safety_requirements : life-safety + role assignment gates
+#   response            : ordered emergency steps (stabilize → verify → escalate →
+#                         monitor → document); each step is action|verify|monitor|
+#                         decision|communicate with an optional `escalate_to`
+#   warning             : top-level hazard callout
+#   backout             : stabilization / hold-safe path when state is unclear
+#   restoration         : controlled return-to-normal readiness gates
+#   signoff             : event-completion record
+#
+# Step attribute conventions (shared with sop/mop):
+#   type    : action | verify | monitor | decision | communicate | document
+#   escalate_to  : companion EOP/MOP to transition to when the branch condition holds
+#   requires_authority : TRUE for any switching/reset — never agent-automatable
+# =============================================================================
+
+eop:
+  schema_version: "1.0"
+
+  # Ownership scope (multi-tenant isolation, design §9-Q5). GA10 is the acme-grid
+  # operator's Atlanta site set, so this runbook is PRIVATE to that tenant — it can
+  # never ground another tenant's fault. Empty site_id = all acme-grid sites.
+  owner:
+    tenant_id: "acme-grid"
+    site_id: ""
+
+  metadata:
+    title: "Utility Source Loss (Single/Both Feeds)"
+    type: "EOP"
+    version: "2.1"
+    document_state: "Draft"
+    file_name: "NA_US_GA10_OPS_EOP_30.0001_Utility_Source_Loss_Single_Both_Feeds"
+    procedure_number: "NA_US_GA10_OPS_EOP_30.0001_Utility_Source_Loss_Single_Both_Feeds"
+    author: "Site Managers"
+    responsible_owner: "Site Manager / Responsible OE"
+    approved_by_cab: "Senior Person Approval"
+    cab_ticket_number: null
+    language: "English"
+    security_classification: "For Internal Use Only"
+    next_review_due: null
+    modified: "2026-07-17"
+    domain: "Data Center Operations"
+    sites_designation: "GA10"
+    estimated_time: "Event-driven; monitor until stable normal or approved alternate state confirmed."
+
+  # Ties this EOP to the FDD alarm/fault register so the agent can auto-select it.
+  trigger:
+    condition: "Loss of voltage on one or both utility mains; ATS sensing dead bus."
+    fault_pattern: "utility_source_loss"
+    # Explicit rule → procedure map (design §4.4 / §9-Q2). Utility-loss / dead-bus /
+    # utility-redundancy-loss FDD rules are remediated by this (authoritative) EoP.
+    remediates: [GRID-001, GRID-003, GRID-004, ATS-003, RED-001]
+    equipment_types: [FeederType, ATSType, SwitchgearType]
+    related_types: [GeneratorSetType, UPSType, PDUType, RPPType]
+    key_data_points:
+      - "Utility voltage per phase (each feed)"
+      - "Utility current per phase (each feed)"
+      - "Main breaker status (52-UM and ties)"
+      - "ATS/STS position and dead-bus indication"
+      - "Generator start / transfer status"
+      - "UPS input / battery state / autonomy"
+
+  scope: >
+    Establishes the immediate response sequence for loss of voltage on one or both
+    utility mains: ATS/dead-bus indications, UPS battery operation, generator
+    start/transfer monitoring, escalation, documentation, and controlled
+    restoration readiness. Protects personnel, critical load, electrical
+    distribution integrity, and communication discipline during a utility event.
+
+  precautions:
+    - >
+      This EOP is for emergency stabilization, monitoring, communication, and
+      documentation. Do NOT manually close/open breakers, force ATS/STS positions,
+      bypass interlocks, reset protective relays, alter generator controls, or
+      perform energized work unless directed by an approved MOP/switching order and
+      qualified electrical authority.
+    - >
+      Treat all utility, switchgear, UPS, generator, ATS/STS, PDU/RPP, and
+      electrical rooms as controlled electrical hazard areas during the event.
+    - >
+      Preserve evidence: alarms, timestamps, utility voltage/current per phase,
+      main breaker status, generator status, ATS status, UPS state, screenshots,
+      and communications.
+    - >
+      Escalate immediately for both-feed loss, generator failure to start/transfer,
+      UPS autonomy concern, critical-load impact, equipment smoke/odor,
+      fire/life-safety condition, or loss of BMS/EPMS visibility.
+    - >
+      Reference the site electrical one-line diagrams (System Group 1 and 2) as
+      schematic references only; verify against current approved as-built documents
+      before any field switching.
+
+  affected_equipment:
+    - type: "Electrical / Utility / Emergency Power"
+      items:
+        - "Utility feeds / main switchgear / ATS-STS / UPS / generators / paralleling gear / PDUs / RPPs / EPMS-BMS points"
+      location: >
+        GA10 utility service, electrical rooms, generator yard/paralleling area,
+        UPS rooms, data hall distribution areas, and monitoring platforms.
+
+  safety_requirements:
+    - "Prioritize life safety; keep personnel clear of electrical equipment unless qualified and assigned."
+    - "Establish an operations lead, a communications lead, and an electrical response lead."
+    - "Use task-appropriate PPE and follow electrical safety, access, and arc-flash boundary requirements for any field verification."
+    - "Maintain emergency access, generator yard access, fuel system access, fire/life-safety access, and control-room communication."
+    - "Move to the applicable companion EOP/MOP if UPS failure, generator start failure, fuel issue, fire/smoke, BMS/EPMS loss, or customer/SLA notification is involved."
+
+  # ===========================================================================
+  # EMERGENCY RESPONSE SEQUENCE
+  # ===========================================================================
+  response:
+    - id: 1
+      type: action
+      instruction: >
+        RECOGNIZE the event from EPMS/BMS/OCC/NOC alarms, utility-source status,
+        ATS/STS indication, UPS status, generator status, area observations, or
+        field reports.
+    - id: 2
+      type: communicate
+      instruction: >
+        ANNOUNCE the event to Shift Lead / Operations Manager and declare whether
+        the initial indication is suspected single-feed loss, both-feed loss, or
+        unknown utility-source condition.
+    - id: 3
+      type: action
+      instruction: >
+        PROTECT personnel. Stop non-essential work in electrical/mechanical/white-
+        space areas and keep unqualified personnel away from affected equipment.
+    - id: 4
+      type: document
+      instruction: >
+        CAPTURE initial evidence: alarm names, timestamps, affected utility
+        source(s), utility voltage/current per phase, main breaker status, ATS/STS
+        status, UPS input/state, generator status, and impacted areas.
+    - id: 5
+      type: verify
+      instruction: >
+        VERIFY whether critical load remains supported by normal source, alternate
+        utility source, UPS, generator, or approved transfer path. Do not assume
+        transfer status from a single indication.
+    - id: 6
+      type: decision
+      instruction: >
+        CHECK whether one utility feed or both feeds are lost using EPMS/BMS
+        readings, main breaker status, ATS/dead-bus indication, and one-line
+        reference information.
+    - id: 7
+      type: decision
+      condition: "single_feed_loss AND critical_load_stable"
+      instruction: >
+        IF single-feed loss is confirmed and critical load is stable, MONITOR the
+        alternate source path, UPS status, generator readiness, alarms, and any
+        redundancy loss. Escalate as a degraded-redundancy condition.
+    - id: 8
+      type: decision
+      condition: "both_feed_loss"
+      instruction: >
+        IF both-feed loss is confirmed or suspected, VERIFY generator start
+        sequence, generator availability, ATS transfer status, bus-voltage
+        restoration, UPS discharge/recharge status, and critical-load stability.
+    - id: 9
+      type: decision
+      condition: "generator_start_or_transfer_failure"
+      escalate_to: "EOP-001 Generator Start Failure Response"
+      instruction: >
+        IF generator fails to start, fails to transfer, trips, alarms critical, or
+        bus voltage is not restored as expected, TRANSITION immediately to the
+        generator start-failure response / approved escalation path.
+    - id: 10
+      type: communicate
+      instruction: >
+        START incident bridge or emergency communications per site escalation
+        expectations. Notify Operations leadership, electrical support, facility
+        leadership, OCC/NOC/customer path, and utility contact path as required.
+    - id: 11
+      type: monitor
+      instruction: >
+        MONITOR UPS battery/autonomy indicators and load state continuously until
+        stable normal/alternate supply is verified. Escalate immediately for
+        autonomy concern or abnormal UPS condition.
+    - id: 12
+      type: monitor
+      instruction: >
+        MONITOR generator engine, breaker, fuel, cooling, exhaust, alarms, and
+        runtime status through approved monitoring platforms and field reports
+        only where safe and authorized.
+    - id: 13
+      type: verify
+      instruction: >
+        VERIFY no concurrent electrical alarms indicate downstream breaker trip,
+        single-cord/dual-cord loss, PDU/RPP issue, power-quality event, or
+        BMS/EPMS visibility problem. Initiate companion EOPs if present.
+    - id: 14
+      type: communicate
+      instruction: >
+        COMMUNICATE event status at defined intervals: source lost, load supported
+        by, generator/UPS status, known impacts, open risks, next actions, and
+        owner assignments.
+    - id: 15
+      type: action
+      requires_authority: true
+      instruction: >
+        DO NOT attempt manual switching or reset protective devices unless directed
+        by approved switching authority and written MOP/emergency scope.
+    - id: 16
+      type: verify
+      requires_authority: true
+      instruction: >
+        WHEN utility returns or stabilizes, do NOT transfer back to normal until
+        electrical authority confirms source quality, equipment state, generator
+        cooldown/availability, UPS recharge status, and approved restoration
+        sequence.
+    - id: 17
+      type: document
+      instruction: >
+        DOCUMENT the full event log: start/end times, alarms, readings, equipment
+        states, communications, decisions, deviations, restoration confirmation,
+        and follow-up work orders.
+    - id: 18
+      type: document
+      instruction: >
+        CREATE corrective work orders for alarm/configuration issues,
+        generator/ATS/UPS anomalies, metering gaps, transfer-sequence concerns,
+        failed indicators, utility coordination items, or documentation gaps.
+    - id: 19
+      type: document
+      instruction: >
+        COMPLETE shift turnover and after-action review notes if the event created
+        redundancy loss, customer/SLA risk, equipment fault, procedural gap, or
+        emergency-communications requirement.
+
+  warning: >
+    Utility-source loss is a critical electrical availability event. Do not
+    improvise switching, bypass interlocks, reset protective devices, or clear
+    evidence. Escalate immediately for both-feed loss, generator transfer failure,
+    UPS autonomy concern, or any critical-load impact.
+
+  # ===========================================================================
+  # BACK-OUT / STABILIZATION
+  # ===========================================================================
+  backout:
+    trigger: >
+      Commence immediately if utility status, transfer status, generator status,
+      UPS autonomy, personnel safety, or critical-load condition is unclear or
+      unstable.
+    procedures:
+      - "Stop non-essential work, hold current safe electrical state, and prevent unauthorized switching or resets."
+      - "Maintain or establish incident command/bridge; keep electrical authority and Operations leadership engaged until stable state is confirmed."
+      - "If both utility feeds are lost and generator/UPS support is abnormal, transition to the applicable emergency progression path (generator start failure, UPS failure / load on bypass, or single/dual-cord power loss)."
+      - "If utility restoration is unstable or power quality is suspect, delay return-to-normal until source quality and restoration sequence are approved by electrical authority."
+      - "Document the final electrical state, unresolved risks, alarms, communications, work orders, and restoration/monitoring plan before closing or downgrading the event."
+
+  signoff:
+    eop_supervisor:
+      name: null
+      title: null
+      signature: null
+      date: null
+    comments_lessons_learned: null

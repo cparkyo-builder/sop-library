@@ -1,0 +1,147 @@
+# =============================================================================
+# Standard Operating Procedure (SOP) — as code
+# Data Center BMS Alarm Management Procedure
+# -----------------------------------------------------------------------------
+# Digitized from
+#   sop-v12/Data Center – BMS Alarm Management Procedure 1.docx
+#
+# Cross-system alarm-handling standard. Grounds the agent's alarm TRIAGE and the
+# ISA-18.2 acknowledge stage: it defines the site severity model, the detect →
+# acknowledge → triage → dispatch → EOP → escalate → resolve workflow, and the
+# escalation matrix. Site context is ATL01-2 (values are site-specific; treat the
+# workflow as portable and the thresholds/roster as per-site fill-ins).
+# =============================================================================
+
+sop:
+  schema_version: "1.0"
+
+  # Ownership scope (design §9-Q5): ATL01-2 is an acme-grid site; private to tenant.
+  owner:
+    tenant_id: "acme-grid"
+    site_id: ""
+
+  metadata:
+    title: "Data Center BMS Alarm Management Procedure"
+    type: "SOP"
+    document_state: "Draft"
+    domain: "Data Center Operations"
+    sites_designation: "ATL01-2"
+    purpose: >
+      Provide a site-specific, repeatable process for managing BMS alarms to
+      protect uptime, maintain customer trust, and ensure disciplined operations
+      during both normal and incident conditions.
+
+  site_context:
+    facility_type: "Live, hyperscale-supported (100MW, 450,000 sq ft, single tenant)"
+    electrical_chain: "Utility → MV switchgear → Generator & ATS → UPS → LV switchgear/Distro → PDU/RPP"
+    mechanical: "Air-cooled chillers; Mechanical Vendor CCU (microchannel coils)"
+    monitoring: "BMS/EPMS, PMS (Power Secure), Fireworks (fire system), OCC (central monitoring & escalation)"
+    operational_reality: >
+      Site actively supports production loads; operational tasks continue during
+      incidents (prioritize, do not abandon).
+
+  # Grounds SEV classification for the agent (aligns to A&E v2.0 / ISA-18.2 P1–P4).
+  severity_model:
+    - severity: "P1 — Critical"
+      definition: "Immediate risk to uptime"
+      examples: "Data-hall temp > 85°F, loss of cooling loop, UPS on battery, major BMS failure"
+      response: "Immediate (<= 5 min)"
+    - severity: "P2 — High"
+      definition: "Redundancy degraded"
+      examples: "Chiller offline with reduced capacity, low CHW DP, CRAH failure in loaded hall"
+      response: "<= 15 min"
+    - severity: "P3 — Medium"
+      definition: "Non-critical deviation"
+      examples: "Temp drift, DP trending low, sensor mismatch"
+      response: "<= 60 min"
+    - severity: "P4 — Low"
+      definition: "Informational"
+      examples: "Status alerts, maintenance reminders"
+      response: "Monitor"
+
+  roles:
+    - role: "Operations Team (Primary)"
+      responsibilities: "Own alarm response and field verification; execute EOPs; maintain system stability."
+    - role: "OCC"
+      responsibilities: "24/7 alarm monitoring; initiate escalation; track timeline and communications."
+    - role: "Site Operations Manager / Chief Engineer"
+      responsibilities: "Incident oversight (P1/P2); customer relationship; vendor performance management."
+    - role: "Vendors"
+      responsibilities: "Mechanical (chillers/CCUs/MCPs); Power (generators, switchgear, UPS, transformers, PMS)."
+
+  # ===========================================================================
+  # ALARM RESPONSE WORKFLOW
+  # ===========================================================================
+  phases:
+    - name: "Detect"
+      steps:
+        - id: 1
+          type: action
+          instruction: "Alarm generated in BMS and visible to Local Ops and OCC; OCC confirms visibility and begins tracking."
+
+    - name: "Acknowledge (do not delay)"
+      steps:
+        - id: 2
+          type: action
+          instruction: "Operator acknowledges the alarm in BMS."
+        - id: 3
+          type: record
+          instruction: "Log immediately: time, system impacted (DH/chiller/CRAH/PowerBlock), initial reading."
+
+    - name: "Rapid Triage (remote)"
+      steps:
+        - id: 4
+          type: verify
+          window: "2–5 min"
+          instruction: "Review temperature trends (last 15–30 min), CCU status (running? airflow?), chilled-water loop (supply/return temps, DP target 15–20 PSI), and electrical load conditions."
+          note: "Always correlate Temp + Airflow + CHW DP + Load."
+
+    - name: "Immediate Dispatch (field verification)"
+      steps:
+        - id: 5
+          type: action
+          applies_to: "All SEV1/SEV2 alarms"
+          instruction: "Dispatch a technician immediately; verify actual temperature vs BMS; confirm CCU operation (fans, valves, alarms); inspect for leaks, noise/vibration, airflow issues; validate no construction/vendor interference."
+
+    - name: "Execute EOP (if triggered)"
+      steps:
+        - id: 6
+          type: decision
+          instruction: "Temperature out of range (primary risk): confirm temp rise; validate CCUs running, CHW flow present, DP within 15–20 PSI."
+        - id: 7
+          type: action
+          condition: "low_dp"
+          instruction: "If low DP: investigate pump/chiller performance; increase cooling capacity if available; shift load if necessary."
+          escalate_to: "eop_loss_of_cooling"
+
+    - name: "Escalation Protocol"
+      steps:
+        - id: 8
+          type: communicate
+          instruction: "Escalate per severity (see escalation matrix)."
+
+    - name: "Resolution"
+      steps:
+        - id: 9
+          type: verify
+          instruction: "Confirm alarm condition cleared and system stabilized; return equipment to normal configuration."
+
+  escalation_matrix:
+    - severity: "SEV1"
+      notify: "Site Operations Manager; Site Operations Team (OCC, Chief Engineer); Incident Manager; Director; VP; Vendor."
+    - severity: "SEV2"
+      notify: "Site Operations Manager; Site Operations Team; Incident Manager; Regional Director; Vendor. Initiate incident bridge if required."
+    - severity: "SEV3"
+      notify: "Site leadership; relevant vendor; customer site leadership & FOC."
+
+  customer_communication:
+    when_to_notify: "Any SEV1–3 event; any issue with potential customer impact."
+    guidelines: "Be proactive, not reactive; keep tone calm, confident, fact-based; provide update cadence."
+
+  signoff:
+    sop_supervisor:
+      name: null
+      title: null
+      signature: null
+      date: null
+    comments_lessons_learned: null
